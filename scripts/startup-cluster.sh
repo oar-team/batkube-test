@@ -3,6 +3,7 @@
 # Amount of processing units and memory in the system
 CPU_HOST="$(nproc)"
 MEM_HOST="$(cat /proc/meminfo | head -n 1 | awk '{ print $2 }')"
+
 K3S_TOKEN=${RANDOM}${RANDOM}${RANDOM}
 
 help () {
@@ -78,9 +79,15 @@ fi
 
 if [ -f "./docker-compose.yaml" ]
 then
-  echo "A docker-compose.yaml file already exists in this directory. Please delete it or move to another directory"
-  exit
+  echo "A docker-compose.yaml file already exists in this directory."
+  read -p "Overwrite? [Y/n] " input
+  if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
+  then
+    exit
+  fi
+  echo
 fi
+
 touch docker-compose.yaml
 
 echo "version: '3'
@@ -125,6 +132,18 @@ done
 echo "
 volumes:
   k3s-server: {}" >> ./docker-compose.yaml
+
+if [ -f "./kubeconfig.yaml" ]
+then
+  echo "A kubeconfig.yaml file already exists in this directory."
+  echo "Launching the cluster will overwrite this file."
+  read -p "Continue? [Y/n] " input
+  if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
+  then
+    exit
+  fi
+  echo
+fi
 
 docker-compose up -d && echo "
 Kubernetes cluster up and running. Try it with kubectl: \"KUBECONFIG=kubeconfig.yaml kubectl get nodes\".
