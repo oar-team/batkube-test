@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/mitchellh/mapstructure"
@@ -42,8 +43,15 @@ func main() {
 	wl := parseFile(*wlJson)
 	pods := translateJobsToPods(&wl)
 	noMoreJobs := make(chan bool)
-	go getJobExecutionData(noMoreJobs)
+	wg := sync.WaitGroup{}
+	go func() {
+		defer wg.Done()
+		defer cleanupResources(cs)
+		wg.Add(1)
+		getJobExecutionData(noMoreJobs)
+	}()
 	submitJobs(cs, pods, noMoreJobs)
+	wg.Wait()
 }
 
 /*
@@ -180,5 +188,32 @@ Stops watching the cluster when all jobs are terminated and upon reception of a
 value on noMoreJobs.
 */
 func getJobExecutionData(noMoreJobs chan bool) {
+	// TODO
+	time.Sleep(1 * time.Second)
 	<-noMoreJobs
+}
+
+/*
+Cleans up the cluster resources in preparatoin for the next epoch
+*/
+func cleanupResources(cs *kubernetes.Clientset) {
+	ctx := context.Background()
+	namespaces, err := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	//var zero int64
+	for _, namespace := range namespaces.Items {
+		if err := cs.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
+			log.Warn(err)
+		} else {
+			log.Infof("[%s] jobs cleaned for namespace %s", time.Now(), namespace.Name)
+		}
+		if err := cs.CoreV1().Pods(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
+			log.Warn(err)
+		} else {
+			log.Infof("[%s] pods cleaned for namespace %s", time.Now(), namespace.Name)
+		}
+	}
+	log.Info("Done cleaning resources")
 }

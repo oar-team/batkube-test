@@ -262,8 +262,6 @@ github.com/urfave/negroni v1.0.0/go.mod h1:Meg73S6kFm/4PpbYdq35yYWoCZ9mS/YSx+lKn
 github.com/vektah/gqlparser v1.1.2/go.mod h1:1ycwN7Ij5njmMkPPAOaRFY4rET2Enx7IkVv3vaXspKw=
 github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c/go.mod h1:lB8K/P019DLNhemzwFU4jHLhdvlE6uDZjXFejJXr49I=
 github.com/xdg/stringprep v0.0.0-20180714160509-73f8eece6fdc/go.mod h1:Jhud4/sHMO4oL310DaZAKk9ZaJ08SJfe+sJh0HrGL1Y=
-gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200721141155-99cc5a82f386 h1:1B8sA/0L/l3Dq0AykoUGTy9Wgwbk/3yW1a3Gg1fJBW8=
-gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200721141155-99cc5a82f386/go.mod h1:oSa1rJCZNGsMvS5GkLxZH4zpRKexTCoJm6recXIMSUs=
 gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200721143233-acc0de1ca11e h1:+xUJ159bi+5NbnVku2KgZbGsOQqj7LdTHciYPss7hw4=
 gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200721143233-acc0de1ca11e/go.mod h1:oSa1rJCZNGsMvS5GkLxZH4zpRKexTCoJm6recXIMSUs=
 go.mongodb.org/mongo-driver v1.0.3/go.mod h1:u7ryQJ+DOzQmeO7zB6MHyr8jkEQvC8vH7qLUO4lqsUM=
