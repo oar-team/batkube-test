@@ -11,6 +11,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
+	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -40,7 +41,9 @@ func main() {
 	// Parse workload, submit the pods
 	wl := parseFile(*wlJson)
 	pods := translateJobsToPods(&wl)
-	submitJobs(cs, pods)
+	noMoreJobs := make(chan bool)
+	go getJobExecutionData(noMoreJobs)
+	submitJobs(cs, pods, noMoreJobs)
 }
 
 /*
@@ -52,6 +55,7 @@ func parseFile(file string) translate.Workload {
 		log.Fatal(err)
 	}
 	decoder := json.NewDecoder(wlFile)
+
 	// First step : decode into a map
 	jsonData := make(map[string]interface{}, 0)
 	err = decoder.Decode(&jsonData)
@@ -126,20 +130,55 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod) {
+func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) {
 	verifyJobSubmissionOrder(pods)
 
 	origin := time.Now()
-	log.Infof("[%s] Experience starts")
+	log.Infof("[%s] Experience starts", origin)
 	offset := origin.Sub(time.Unix(0, 0))
-	// TODO : do that with parallel tasks to minimize overhead when
-	// multiple jobs are submitted at the same time.
+	// TODO : find a way to submit jobs in parallel to reduce overhead when
+	// multiple jobs are submitted at the same time. Unfortunately, doing
+	// this naively is impossible due to the api's rate limiting policies.
+	// Maybe even the reason this loop is so slow is because of those
+	// policies, and the client waiting for the api to be ready again.
+	one := int32(1)
+	var zero int32
 	for _, pod := range pods {
 		offsettedSubTime := pod.CreationTimestamp.Add(offset)
 		if time.Now().Before(offsettedSubTime) {
 			time.Sleep(offsettedSubTime.Sub(time.Now()))
 		}
-		cs.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-		log.Infof("[%s] job %s submitted", time.Now(), pod.Name, pod.CreationTimestamp.Time)
+		pod.Spec.RestartPolicy = v1.RestartPolicyOnFailure
+		if _, err := cs.BatchV1().Jobs(pod.Namespace).Create(context.Background(),
+			&batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: pod.Name,
+				},
+				Spec: batchv1.JobSpec{
+					Completions:             &one,
+					TTLSecondsAfterFinished: &zero,
+					Template: v1.PodTemplateSpec{
+						Spec: pod.Spec,
+					},
+				},
+			},
+			metav1.CreateOptions{},
+		); err != nil {
+			log.Warnln(err)
+		} else {
+			log.Infof("[%s] job %s submitted", time.Now(), pod.Name)
+		}
 	}
+	noMoreJobs <- true
+}
+
+/*
+Continuously watches the cluster state and gets the necessary information to
+generate a csv file, with the same information as Batsim csv output.
+
+Stops watching the cluster when all jobs are terminated and upon reception of a
+value on noMoreJobs.
+*/
+func getJobExecutionData(noMoreJobs chan bool) {
+	<-noMoreJobs
 }
