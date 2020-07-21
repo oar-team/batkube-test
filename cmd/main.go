@@ -147,8 +147,9 @@ func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) 
 	// TODO : find a way to submit jobs in parallel to reduce overhead when
 	// multiple jobs are submitted at the same time. Unfortunately, doing
 	// this naively is impossible due to the api's rate limiting policies.
-	// Maybe even the reason this loop is so slow is because of those
-	// policies, and the client waiting for the api to be ready again.
+	//
+	// That said, maybe the reason this loop is is because of this rate
+	// limiting in the first place. Then, nothing is to be done.
 	one := int32(1)
 	var zero int32
 	for _, pod := range pods {
@@ -194,7 +195,7 @@ func getJobExecutionData(noMoreJobs chan bool) {
 }
 
 /*
-Cleans up the cluster resources in preparatoin for the next epoch
+Cleans up the cluster resources in preparation for the next epoch
 */
 func cleanupResources(cs *kubernetes.Clientset) {
 	ctx := context.Background()
@@ -202,8 +203,11 @@ func cleanupResources(cs *kubernetes.Clientset) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//var zero int64
 	for _, namespace := range namespaces.Items {
+		// Ignore namespaces inherent to kubernetes
+		if namespace.Name == "kube-system" || namespace.Name == "kube-public" || namespace.Name == "kube-node-lease" {
+			continue
+		}
 		if err := cs.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
