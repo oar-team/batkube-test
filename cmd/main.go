@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
+	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -24,8 +27,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	wl := parseFile(*wlJson)
-
+	// Initialise kubernetes client
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		log.Fatal(err)
@@ -35,7 +37,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	submitJobs(cs, translateJobsToPods(&wl))
+	// Parse workload, submit the pods
+	wl := parseFile(*wlJson)
+	pods := translateJobsToPods(&wl)
+	submitJobs(cs, pods)
 }
 
 /*
@@ -108,9 +113,33 @@ func translateJobsToPods(wl *translate.Workload) []*v1.Pod {
 	return pods
 }
 
+func verifyJobSubmissionOrder(pods []*v1.Pod) {
+	lastCreationTimeStamp := time.Unix(0, 0)
+	for _, pod := range pods {
+		if pod.CreationTimestamp.Time.Before(lastCreationTimeStamp) {
+			log.Fatal("pods are not ordered by submission timestamps")
+		}
+		lastCreationTimeStamp = pod.CreationTimestamp.Time
+	}
+}
+
 /*
 Submits the given jobs at the correct timestamps.
 */
 func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod) {
-	//TODO
+	verifyJobSubmissionOrder(pods)
+
+	origin := time.Now()
+	log.Infof("[%s] Experience starts")
+	offset := origin.Sub(time.Unix(0, 0))
+	// TODO : do that with parallel tasks to minimize overhead when
+	// multiple jobs are submitted at the same time.
+	for _, pod := range pods {
+		offsettedSubTime := pod.CreationTimestamp.Add(offset)
+		if time.Now().Before(offsettedSubTime) {
+			time.Sleep(offsettedSubTime.Sub(time.Now()))
+		}
+		cs.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+		log.Infof("[%s] job %s submitted", time.Now(), pod.Name, pod.CreationTimestamp.Time)
+	}
 }
