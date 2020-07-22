@@ -62,10 +62,11 @@ func main() {
 	wlJson := flag.String("w", "", "File specifying a Batsim workload in json format")
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig.yaml")
 	outDir := flag.String("out", "", "path/to/output/dir/prefix")
+	epochs := flag.String("epochs", "", "Number of iterations to run")
 
 	flag.Parse()
-	if *wlJson == "" || *kubeconfig == "" || *outDir == "" {
-		fmt.Fprintf(os.Stderr, "usage:\n\tbatkube-test -w <workload.json> -config <kubeconfig.yaml> -out output/dir/prefix\n")
+	if *wlJson == "" || *kubeconfig == "" || *outDir == "" || *epochs == "" {
+		flag.Usage()
 		os.Exit(1)
 	}
 
@@ -79,32 +80,40 @@ func main() {
 	quit := make(chan struct{})
 	defer close(quit)
 	initEventInformer(s, quit)
-	csvData := initialState(&wl)
-	s.unfinishedJobs = len(csvData) - 1
 
 	// Launch the experience
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	s.origin = time.Now()
-	go func() {
-		defer wg.Done()
-		defer cleanupResources(s)
-		runResourceWatcher(s, csvData)
-	}()
-	go func() {
-		defer wg.Done()
-		runPodSubmitter(s, pods)
-	}()
-	wg.Wait()
-	computeRemainingData(csvData)
+	epochsValue, err := strconv.Atoi(*epochs)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for i := 0; i < epochsValue; i++ {
+		log.Infof("\n========EPOCH %d========\n", i)
+		csvData := initialState(&wl)
+		s.unfinishedJobs = len(csvData) - 1
 
-	writeCsv(csvData, *outDir)
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+		s.origin = time.Now()
+		go func() {
+			defer wg.Done()
+			defer cleanupResources(s)
+			runResourceWatcher(s, csvData)
+		}()
+		go func() {
+			defer wg.Done()
+			runPodSubmitter(s, pods)
+		}()
+		wg.Wait()
+		computeRemainingData(csvData)
+
+		writeCsv(csvData, *outDir, i)
+	}
 }
 
-func writeCsv(csvData [][]string, outDir string) {
+func writeCsv(csvData [][]string, outDir string, epoch int) {
 	dir := path.Dir(outDir)
 	prefix := path.Base(outDir)
-	f, err := os.Create(path.Join(dir, prefix+"_jobs.csv"))
+	f, err := os.Create(path.Join(dir, prefix+fmt.Sprintf("%d", epoch)+"_jobs.csv"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -417,5 +426,7 @@ func cleanupResources(s *submitter) {
 			log.Infof("events cleaned for namespace %s", namespace.Name)
 		}
 	}
+	log.Infoln("Waiting a bit for resources to finish cleaning...")
+	time.Sleep(1 * time.Second)
 	log.Info("Done cleaning resources")
 }
