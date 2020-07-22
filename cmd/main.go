@@ -63,11 +63,19 @@ func main() {
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig.yaml")
 	outDir := flag.String("out", "", "path/to/output/dir/prefix")
 	epochs := flag.String("epochs", "", "Number of iterations to run")
+	loglevel := flag.String("loglevel", "", "Log level")
 
 	flag.Parse()
 	if *wlJson == "" || *kubeconfig == "" || *outDir == "" || *epochs == "" {
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	level, err := log.ParseLevel(*loglevel)
+	if err == nil {
+		log.SetLevel(level)
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
 
 	s := newSubmitterForConfig(*kubeconfig)
@@ -336,7 +344,7 @@ func runResourceWatcher(s *submitter, csvData [][]string) {
 		case <-s.noMoreJobs:
 			noMoreJobsBool = true
 		case e := <-s.events:
-			log.Infoln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
+			log.Debugln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
 			handleEvent(s, csvData, e)
 		}
 	}
