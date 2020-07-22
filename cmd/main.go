@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
@@ -60,10 +61,11 @@ type submitter struct {
 func main() {
 	wlJson := flag.String("w", "", "File specifying a Batsim workload in json format")
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig.yaml")
+	outDir := flag.String("out", "", "path/to/output/dir/prefix")
 
 	flag.Parse()
-	if *wlJson == "" || *kubeconfig == "" {
-		fmt.Fprintf(os.Stderr, "usage:\n\tbatkube-test -w <workload.json> -config <kubeconfig.yaml>\n")
+	if *wlJson == "" || *kubeconfig == "" || *outDir == "" {
+		fmt.Fprintf(os.Stderr, "usage:\n\tbatkube-test -w <workload.json> -config <kubeconfig.yaml> -out output/dir/prefix\n")
 		os.Exit(1)
 	}
 
@@ -95,7 +97,22 @@ func main() {
 	}()
 	wg.Wait()
 	computeRemainingData(csvData)
-	spew.Dump(csvData)
+
+	writeCsv(csvData, *outDir)
+}
+
+func writeCsv(csvData [][]string, outDir string) {
+	dir := path.Dir(outDir)
+	prefix := path.Base(outDir)
+	f, err := os.Create(path.Join(dir, prefix+"_jobs.csv"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Infoln("Writing output to", f.Name())
+	w := csv.NewWriter(f)
+	if err := w.WriteAll(csvData); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func newSubmitterForConfig(kubeconfig string) *submitter {
