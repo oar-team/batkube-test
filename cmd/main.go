@@ -47,6 +47,14 @@ const (
 	created
 )
 
+type submitter struct {
+	clientset      *kubernetes.Clientset
+	noMoreJobs     chan bool
+	events         chan *v1.Event
+	origin         time.Time
+	unfinishedJobs int
+}
+
 func main() {
 	wlJson := flag.String("w", "", "File specifying a Batsim workload in json format")
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig.yaml")
@@ -57,8 +65,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize kubernetes client
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	s := newSubmitterForConfig(*kubeconfig)
+
+	// Parse workload
+	wl := parseFile(*wlJson)
+	pods := translateJobsToPods(&wl)
+
+	// Initialize
+	quit := make(chan struct{})
+	defer close(quit)
+	initEventInformer(s, quit)
+	csvData := initialState(&wl)
+	s.unfinishedJobs = len(csvData) - 1
+
+	// Launch the experience
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	s.origin = time.Now()
+	go func() {
+		defer wg.Done()
+		defer cleanupResources(s)
+		runResourceWatcher(s, csvData)
+	}()
+	go func() {
+		defer wg.Done()
+		runPodSubmitter(s, pods)
+	}()
+	wg.Wait()
+	computeRemainingData(csvData)
+	spew.Dump(csvData)
+}
+
+func newSubmitterForConfig(kubeconfig string) *submitter {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,37 +106,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Parse workload
-	wl := parseFile(*wlJson)
-	pods := translateJobsToPods(&wl)
-
-	// Initialize channels
-	noMoreJobs := make(chan bool)
-	quit := make(chan struct{})
-	events := make(chan *v1.Event)
-	defer close(quit)
-
-	// Initialize the experience
-	initEventInformer(cs, events, quit)
-	csvData := initialState(&wl)
-
-	// Launch the experience
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	// This will break in 2262-04-11 23:47:16.854775807 +0000 UTC :^)
-	origin := time.Now()
-	go func() {
-		defer wg.Done()
-		defer cleanupResources(cs)
-		runResourceWatcher(csvData, noMoreJobs, events, origin)
-	}()
-	go func() {
-		defer wg.Done()
-		runPodSubmitter(cs, pods, noMoreJobs, origin)
-	}()
-	wg.Wait()
-	computeRemainingData(csvData)
-	spew.Dump(csvData)
+	return &submitter{
+		clientset:  cs,
+		noMoreJobs: make(chan bool),
+		events:     make(chan *v1.Event),
+	}
 }
 
 /*
@@ -184,7 +197,7 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool, origin time.Time) {
+func runPodSubmitter(s *submitter, pods []*v1.Pod) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
 
 	// TODO : find a way to submit jobs in parallel to reduce overhead when
@@ -196,12 +209,12 @@ func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan b
 	one := int32(1)
 	var zero int32
 	for _, pod := range pods {
-		offsettedSubTime := origin.Add(time.Duration(pod.CreationTimestamp.UnixNano()))
+		offsettedSubTime := s.origin.Add(time.Duration(pod.CreationTimestamp.UnixNano()))
 		if time.Now().Before(offsettedSubTime) {
 			time.Sleep(offsettedSubTime.Sub(time.Now()))
 		}
 		pod.Spec.RestartPolicy = v1.RestartPolicyOnFailure
-		if _, err := cs.BatchV1().Jobs(pod.Namespace).Create(context.Background(),
+		if _, err := s.clientset.BatchV1().Jobs(pod.Namespace).Create(context.Background(),
 			&batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: pod.Name,
@@ -221,7 +234,7 @@ func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan b
 			log.Infof("job %s submitted", pod.Name)
 		}
 	}
-	noMoreJobs <- true
+	s.noMoreJobs <- true
 }
 
 func initialState(wl *translate.Workload) [][]string {
@@ -273,21 +286,20 @@ func computeRemainingData(csvData [][]string) {
 /*
 Continuously watches the cluster state and writes the events to csvData
 */
-func runResourceWatcher(csvData [][]string, noMoreJobs chan bool, events chan *v1.Event, origin time.Time) {
-	var unfinishedJobs = len(csvData) - 1 // All the jobs are pending at this moment
+func runResourceWatcher(s *submitter, csvData [][]string) {
 	var noMoreJobsBool bool
-	for unfinishedJobs > 0 || !noMoreJobsBool {
+	for s.unfinishedJobs > 0 || !noMoreJobsBool {
 		select {
-		case <-noMoreJobs:
+		case <-s.noMoreJobs:
 			noMoreJobsBool = true
-		case e := <-events:
+		case e := <-s.events:
 			log.Infoln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
-			handleEvent(csvData, e, &unfinishedJobs, origin)
+			handleEvent(s, csvData, e)
 		}
 	}
 }
 
-func handleEvent(csvData [][]string, event *v1.Event, unfinishedJobs *int, origin time.Time) {
+func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
 	id := strings.Split(event.InvolvedObject.Name, "-")[1] // pods names
 	var jobLine []string
 	for _, line := range csvData {
@@ -301,22 +313,22 @@ func handleEvent(csvData [][]string, event *v1.Event, unfinishedJobs *int, origi
 	// time is not entirely synchronized with this script's time.
 	switch event.Reason {
 	case "Completed":
-		*unfinishedJobs--
-		jobLine[finish_time] = timeToBatsimTime(time.Now(), origin)
+		s.unfinishedJobs--
+		jobLine[finish_time] = timeToBatsimTime(time.Now(), s.origin)
 	case "SuccessfulCreate":
 		// Event originating from a Job
-		jobLine[submission_time] = timeToBatsimTime(time.Now(), origin)
+		jobLine[submission_time] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
 		// TODO get pod nodeName
-		jobLine[scheduled] = timeToBatsimTime(time.Now(), origin)
+		jobLine[scheduled] = timeToBatsimTime(time.Now(), s.origin)
 	case "Pulling":
-		jobLine[pulling] = timeToBatsimTime(time.Now(), origin)
+		jobLine[pulling] = timeToBatsimTime(time.Now(), s.origin)
 	case "Pulled":
-		jobLine[pulled] = timeToBatsimTime(time.Now(), origin)
+		jobLine[pulled] = timeToBatsimTime(time.Now(), s.origin)
 	case "Started":
-		jobLine[starting_time] = timeToBatsimTime(time.Now(), origin)
+		jobLine[starting_time] = timeToBatsimTime(time.Now(), s.origin)
 	case "Created":
-		jobLine[created] = timeToBatsimTime(time.Now(), origin)
+		jobLine[created] = timeToBatsimTime(time.Now(), s.origin)
 	default:
 	}
 }
@@ -325,11 +337,11 @@ func timeToBatsimTime(t time.Time, origin time.Time) string {
 	return fmt.Sprintf("%f", float64(t.Sub(origin).Round(time.Millisecond))/1e9)
 }
 
-func initEventInformer(cs *kubernetes.Clientset, events chan *v1.Event, quit chan struct{}) {
-	factory := informers.NewSharedInformerFactory(cs, 0)
+func initEventInformer(s *submitter, quit chan struct{}) {
+	factory := informers.NewSharedInformerFactory(s.clientset, 0)
 	factory.Core().V1().Events().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			events <- obj.(*v1.Event)
+			s.events <- obj.(*v1.Event)
 		},
 	})
 	factory.Start(quit)
@@ -338,9 +350,9 @@ func initEventInformer(cs *kubernetes.Clientset, events chan *v1.Event, quit cha
 /*
 Cleans up the cluster resources in preparation for the next epoch
 */
-func cleanupResources(cs *kubernetes.Clientset) {
+func cleanupResources(s *submitter) {
 	ctx := context.Background()
-	namespaces, err := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	namespaces, err := s.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -352,17 +364,17 @@ func cleanupResources(cs *kubernetes.Clientset) {
 		if namespace.Name == "kube-system" || namespace.Name == "kube-public" || namespace.Name == "kube-node-lease" {
 			continue
 		}
-		if err := cs.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		if err := s.clientset.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
 			log.Infof("jobs cleaned for namespace %s", namespace.Name)
 		}
-		if err := cs.CoreV1().Pods(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		if err := s.clientset.CoreV1().Pods(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
 			log.Infof("pods cleaned for namespace %s", namespace.Name)
 		}
-		if err := cs.CoreV1().Events(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		if err := s.clientset.CoreV1().Events(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
 			log.Infof("events cleaned for namespace %s", namespace.Name)
