@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,27 +25,27 @@ import (
 )
 
 const (
-	job_id int = iota
-	workload_name
-	profile
-	submission_time
-	requested_number_of_resources
-	requested_time
-	success
-	final_state
-	starting_time
-	execution_time
-	finish_time
-	waiting_time
-	turnaround_time
-	stretch
-	allocated_resources
-	consumed_energy
-	metadata
-	scheduled
-	pulling
-	pulled
-	created
+	jobIdIndex int = iota
+	workloadNameIndex
+	profileIndex
+	submissionTimeIndex
+	requestedNumberOfResourcesIndex
+	requestedTimeIndex
+	successIndex
+	finalStateIndex
+	startingTimeIndex
+	executionTimeIndex
+	finishTimeIndex
+	waitingTimeIndex
+	turnaroundTimeIndex
+	stretchIndex
+	allocatedResourcesIndex
+	consumedEnergyIndex
+	metadataIndex
+	scheduledIndex
+	pullingIndex
+	pulledIndex
+	createdIndex
 )
 
 type submitter struct {
@@ -267,22 +268,42 @@ func initialState(wl *translate.Workload) [][]string {
 
 	for i, job := range wl.Jobs {
 		csvData = append(csvData, make([]string, len(csvData[0])))
-		csvData[i+1][job_id] = job.Id
-		csvData[i+1][workload_name] = "w0"
-		csvData[i+1][profile] = job.Profile
-		csvData[i+1][requested_number_of_resources] = "1"
-		csvData[i+1][requested_time] = "0" // Time limit on pods is not implemented in batkube
-		csvData[i+1][consumed_energy] = "-1"
-		// TODO : check that pods completed successfully indeed
-		csvData[i+1][final_state] = "COMPLETED_SUCCESSFULLY"
-		csvData[i+1][success] = "1"
+		csvData[i+1][jobIdIndex] = job.Id
+		csvData[i+1][workloadNameIndex] = "w0"
+		csvData[i+1][profileIndex] = job.Profile
+		csvData[i+1][requestedNumberOfResourcesIndex] = "1"
+		csvData[i+1][requestedTimeIndex] = "0" // Time limit on pods is not implemented in batkube
+		csvData[i+1][consumedEnergyIndex] = "-1"
+		// TODO : handle jobs other finishing states
+		csvData[i+1][finalStateIndex] = "COMPLETED_SUCCESSFULLY"
+		csvData[i+1][successIndex] = "1"
 
 	}
 	return csvData
 }
 
 func computeRemainingData(csvData [][]string) {
+	for _, line := range csvData[1:] {
+		startingTime, err := strconv.ParseFloat(line[startingTimeIndex], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		finishingTime, err := strconv.ParseFloat(line[finishTimeIndex], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		submissionTime, err := strconv.ParseFloat(line[submissionTimeIndex], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		waitingTime := startingTime - submissionTime
+		executionTime := finishingTime - startingTime
 
+		line[executionTimeIndex] = fmt.Sprintf("%f", executionTime)
+		line[waitingTimeIndex] = fmt.Sprintf("%f", waitingTime)
+		line[turnaroundTimeIndex] = fmt.Sprintf("%f", executionTime+waitingTime)
+		line[stretchIndex] = fmt.Sprintf("%f", (finishingTime-submissionTime)/(finishingTime-startingTime))
+	}
 }
 
 /*
@@ -316,24 +337,24 @@ func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
 	switch event.Reason {
 	case "Completed":
 		s.unfinishedJobs--
-		jobLine[finish_time] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "SuccessfulCreate":
-		jobLine[submission_time] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
 		pod, err := s.cs.CoreV1().Pods(event.Namespace).Get(s.ctx, event.InvolvedObject.Name, metav1.GetOptions{})
 		if err != nil {
 			log.Fatal(err)
 		}
-		jobLine[scheduled] = timeToBatsimTime(time.Now(), s.origin)
-		jobLine[allocated_resources] = pod.Spec.NodeName
+		jobLine[scheduledIndex] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[allocatedResourcesIndex] = pod.Spec.NodeName
 	case "Pulling":
-		jobLine[pulling] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[pullingIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Pulled":
-		jobLine[pulled] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[pulledIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Started":
-		jobLine[starting_time] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[startingTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Created":
-		jobLine[created] = timeToBatsimTime(time.Now(), s.origin)
+		jobLine[createdIndex] = timeToBatsimTime(time.Now(), s.origin)
 	default:
 	}
 }
