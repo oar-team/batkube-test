@@ -203,12 +203,6 @@ Submits the given jobs at the correct timestamps.
 func runPodSubmitter(s *submitter, pods []*v1.Pod) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
 
-	// TODO : find a way to submit jobs in parallel to reduce overhead when
-	// multiple jobs are submitted at the same time. Unfortunately, doing
-	// this naively is impossible due to the api's rate limiting policies.
-	//
-	// That said, maybe the reason this loop is is because of this rate
-	// limiting in the first place. Then, nothing is to be done.
 	one := int32(1)
 	var zero int32
 	for _, pod := range pods {
@@ -241,7 +235,7 @@ func runPodSubmitter(s *submitter, pods []*v1.Pod) {
 }
 
 func initialState(wl *translate.Workload) [][]string {
-	// Do not change this order
+	// This column order must correspond to the indexes defined at the top of this file
 	csvData := [][]string{{
 		"job_id",
 		"workload_name",
@@ -274,7 +268,7 @@ func initialState(wl *translate.Workload) [][]string {
 		csvData[i+1][requestedNumberOfResourcesIndex] = "1"
 		csvData[i+1][requestedTimeIndex] = "0" // Time limit on pods is not implemented in batkube
 		csvData[i+1][consumedEnergyIndex] = "-1"
-		// TODO : handle jobs other finishing states
+		// TODO : handle pods finishing states
 		csvData[i+1][finalStateIndex] = "COMPLETED_SUCCESSFULLY"
 		csvData[i+1][successIndex] = "1"
 
@@ -334,6 +328,7 @@ func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
 	// Trying to use event.CreationTimestamp results in negative values
 	// when considering "origin" as the time origin. Maybe the api server's
 	// time is not entirely synchronized with this script's time.
+	// A slight overhead is then added to these times.
 	switch event.Reason {
 	case "Completed":
 		s.unfinishedJobs--
