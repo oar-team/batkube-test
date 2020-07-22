@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
@@ -19,6 +21,30 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+)
+
+const (
+	job_id int = iota
+	workload_name
+	profile
+	submission_time
+	requested_number_of_resources
+	requested_time
+	success
+	final_state
+	starting_time
+	execution_time
+	finish_time
+	waiting_time
+	turnaround_time
+	stretch
+	allocated_resources
+	consumed_energy
+	metadata
+	scheduled
+	pulling
+	pulled
+	created
 )
 
 func main() {
@@ -53,21 +79,25 @@ func main() {
 
 	// Initialize the experience
 	initEventInformer(cs, events, quit)
-	csvData := initialState(pods)
+	csvData := initialState(&wl)
 
 	// Launch the experience
 	wg := sync.WaitGroup{}
 	wg.Add(2)
+	// This will break in 2262-04-11 23:47:16.854775807 +0000 UTC :^)
+	origin := time.Now()
 	go func() {
 		defer wg.Done()
 		defer cleanupResources(cs)
-		runResourceWatcher(csvData, noMoreJobs, events)
+		runResourceWatcher(csvData, noMoreJobs, events, origin)
 	}()
 	go func() {
 		defer wg.Done()
-		runPodSubmitter(cs, pods, noMoreJobs)
+		runPodSubmitter(cs, pods, noMoreJobs, origin)
 	}()
 	wg.Wait()
+	computeRemainingData(csvData)
+	spew.Dump(csvData)
 }
 
 /*
@@ -154,12 +184,8 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) {
+func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool, origin time.Time) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
-
-	origin := time.Now()
-	log.Infof("[%s] Experience starts", origin)
-	offset := origin.Sub(time.Unix(0, 0))
 
 	// TODO : find a way to submit jobs in parallel to reduce overhead when
 	// multiple jobs are submitted at the same time. Unfortunately, doing
@@ -170,7 +196,7 @@ func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan b
 	one := int32(1)
 	var zero int32
 	for _, pod := range pods {
-		offsettedSubTime := pod.CreationTimestamp.Add(offset)
+		offsettedSubTime := origin.Add(time.Duration(pod.CreationTimestamp.UnixNano()))
 		if time.Now().Before(offsettedSubTime) {
 			time.Sleep(offsettedSubTime.Sub(time.Now()))
 		}
@@ -198,7 +224,8 @@ func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan b
 	noMoreJobs <- true
 }
 
-func initialState(pods []*v1.Pod) [][]string {
+func initialState(wl *translate.Workload) [][]string {
+	// Do not change this order
 	csvData := [][]string{{
 		"job_id",
 		"workload_name",
@@ -217,18 +244,36 @@ func initialState(pods []*v1.Pod) [][]string {
 		"allocated_resources",
 		"consumed_energy",
 		"metadata",
+		"scheduled",
+		"pulling",
+		"pulled",
+		"created",
 	}}
 
-	for _, pod := range pods {
-		csvData = append(csvData, []string{pod.Name})
+	for i, job := range wl.Jobs {
+		csvData = append(csvData, make([]string, len(csvData[0])))
+		csvData[i+1][job_id] = job.Id
+		csvData[i+1][workload_name] = "w0"
+		csvData[i+1][profile] = job.Profile
+		csvData[i+1][requested_number_of_resources] = "1"
+		csvData[i+1][requested_time] = "0" // Time limit on pods is not implemented in batkube
+		csvData[i+1][consumed_energy] = "-1"
+		// TODO : check that pods completed successfully indeed
+		csvData[i+1][final_state] = "COMPLETED_SUCCESSFULLY"
+		csvData[i+1][success] = "1"
+
 	}
 	return csvData
+}
+
+func computeRemainingData(csvData [][]string) {
+
 }
 
 /*
 Continuously watches the cluster state and writes the events to csvData
 */
-func runResourceWatcher(csvData [][]string, noMoreJobs chan bool, events chan *v1.Event) {
+func runResourceWatcher(csvData [][]string, noMoreJobs chan bool, events chan *v1.Event, origin time.Time) {
 	var unfinishedJobs = len(csvData) - 1 // All the jobs are pending at this moment
 	var noMoreJobsBool bool
 	for unfinishedJobs > 0 || !noMoreJobsBool {
@@ -237,17 +282,47 @@ func runResourceWatcher(csvData [][]string, noMoreJobs chan bool, events chan *v
 			noMoreJobsBool = true
 		case e := <-events:
 			log.Infoln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
-			handleEvent(csvData, e, &unfinishedJobs)
+			handleEvent(csvData, e, &unfinishedJobs, origin)
 		}
 	}
 }
 
-func handleEvent(csvData [][]string, event *v1.Event, unfinishedJobs *int) {
+func handleEvent(csvData [][]string, event *v1.Event, unfinishedJobs *int, origin time.Time) {
+	id := strings.Split(event.InvolvedObject.Name, "-")[1] // pods names
+	var jobLine []string
+	for _, line := range csvData {
+		if line[0] == id {
+			jobLine = line
+		}
+	}
+
+	// Trying to use event.CreationTimestamp results in negative values
+	// when considering "origin" as the time origin. Maybe the api server's
+	// time is not entirely synchronized with this script's time.
 	switch event.Reason {
 	case "Completed":
 		*unfinishedJobs--
+		jobLine[finish_time] = timeToBatsimTime(time.Now(), origin)
+	case "SuccessfulCreate":
+		// Event originating from a Job
+		jobLine[submission_time] = timeToBatsimTime(time.Now(), origin)
+	case "Scheduled":
+		// TODO get pod nodeName
+		jobLine[scheduled] = timeToBatsimTime(time.Now(), origin)
+	case "Pulling":
+		jobLine[pulling] = timeToBatsimTime(time.Now(), origin)
+	case "Pulled":
+		jobLine[pulled] = timeToBatsimTime(time.Now(), origin)
+	case "Started":
+		jobLine[starting_time] = timeToBatsimTime(time.Now(), origin)
+	case "Created":
+		jobLine[created] = timeToBatsimTime(time.Now(), origin)
 	default:
 	}
+}
+
+func timeToBatsimTime(t time.Time, origin time.Time) string {
+	return fmt.Sprintf("%f", float64(t.Sub(origin).Round(time.Millisecond))/1e9)
 }
 
 func initEventInformer(cs *kubernetes.Clientset, events chan *v1.Event, quit chan struct{}) {
