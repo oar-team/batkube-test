@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
@@ -42,19 +41,32 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Parse workload, submit the pods
+	// Parse workload
 	wl := parseFile(*wlJson)
 	pods := translateJobsToPods(&wl)
+
+	// Initialize channels
 	noMoreJobs := make(chan bool)
+	quit := make(chan struct{})
+	events := make(chan *v1.Event)
+	defer close(quit)
+
+	// Initialize the experience
+	initEventInformer(cs, events, quit)
+	csvData := initialState(pods)
+
+	// Launch the experience
 	wg := sync.WaitGroup{}
-	initInformers(cs)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		defer cleanupResources(cs)
-		wg.Add(1)
-		getJobExecutionData(noMoreJobs)
+		runResourceWatcher(csvData, noMoreJobs, events)
 	}()
-	submitJobs(cs, pods, noMoreJobs)
+	go func() {
+		defer wg.Done()
+		runPodSubmitter(cs, pods, noMoreJobs)
+	}()
 	wg.Wait()
 }
 
@@ -142,12 +154,13 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) {
-	verifyJobSubmissionOrder(pods)
+func runPodSubmitter(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) {
+	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
 
 	origin := time.Now()
 	log.Infof("[%s] Experience starts", origin)
 	offset := origin.Sub(time.Unix(0, 0))
+
 	// TODO : find a way to submit jobs in parallel to reduce overhead when
 	// multiple jobs are submitted at the same time. Unfortunately, doing
 	// this naively is impossible due to the api's rate limiting policies.
@@ -179,40 +192,72 @@ func submitJobs(cs *kubernetes.Clientset, pods []*v1.Pod, noMoreJobs chan bool) 
 		); err != nil {
 			log.Warnln(err)
 		} else {
-			log.Infof("[%s] job %s submitted", time.Now(), pod.Name)
+			log.Infof("job %s submitted", pod.Name)
 		}
 	}
 	noMoreJobs <- true
 }
 
-/*
-Continuously watches the cluster state and gets the necessary information to
-generate a csv file, with the same information as Batsim csv output.
+func initialState(pods []*v1.Pod) [][]string {
+	csvData := [][]string{{
+		"job_id",
+		"workload_name",
+		"profile",
+		"submission_time",
+		"requested_number_of_resources",
+		"requested_time",
+		"success",
+		"final_state",
+		"starting_time",
+		"execution_time",
+		"finish_time",
+		"waiting_time",
+		"turnaround_time",
+		"stretch",
+		"allocated_resources",
+		"consumed_energy",
+		"metadata",
+	}}
 
-Stops watching the cluster when all jobs are terminated and upon reception of a
-value on noMoreJobs.
-*/
-func getJobExecutionData(noMoreJobs chan bool) {
-	// TODO
-	time.Sleep(10000 * time.Second)
-	<-noMoreJobs
+	for _, pod := range pods {
+		csvData = append(csvData, []string{pod.Name})
+	}
+	return csvData
 }
 
-func initInformers(cs *kubernetes.Clientset) {
-	//TODO
+/*
+Continuously watches the cluster state and writes the events to csvData
+*/
+func runResourceWatcher(csvData [][]string, noMoreJobs chan bool, events chan *v1.Event) {
+	var unfinishedJobs = len(csvData) - 1 // All the jobs are pending at this moment
+	var noMoreJobsBool bool
+	for unfinishedJobs > 0 || !noMoreJobsBool {
+		select {
+		case <-noMoreJobs:
+			noMoreJobsBool = true
+		case e := <-events:
+			log.Infoln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
+			handleEvent(csvData, e, &unfinishedJobs)
+		}
+	}
+}
+
+func handleEvent(csvData [][]string, event *v1.Event, unfinishedJobs *int) {
+	switch event.Reason {
+	case "Completed":
+		*unfinishedJobs--
+	default:
+	}
+}
+
+func initEventInformer(cs *kubernetes.Clientset, events chan *v1.Event, quit chan struct{}) {
 	factory := informers.NewSharedInformerFactory(cs, 0)
-	factory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			job, ok := newObj.(*v1.Pod)
-			if !ok {
-				log.Fatal("Got something else than a job in the informer")
-			}
-			spew.Dump(job)
-		},
+	factory.Core().V1().Events().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			log.Info("new job added to store")
+			events <- obj.(*v1.Event)
 		},
 	})
+	factory.Start(quit)
 }
 
 /*
@@ -224,20 +269,28 @@ func cleanupResources(cs *kubernetes.Clientset) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var zero int64
+	log.Infoln("Waiting a bit for resources to stabilize before cleaning...")
+	time.Sleep(1 * time.Second)
 	for _, namespace := range namespaces.Items {
 		// Ignore namespaces inherent to kubernetes
 		if namespace.Name == "kube-system" || namespace.Name == "kube-public" || namespace.Name == "kube-node-lease" {
 			continue
 		}
-		if err := cs.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
+		if err := cs.BatchV1().Jobs(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
-			log.Infof("[%s] jobs cleaned for namespace %s", time.Now(), namespace.Name)
+			log.Infof("jobs cleaned for namespace %s", namespace.Name)
 		}
-		if err := cs.CoreV1().Pods(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
+		if err := cs.CoreV1().Pods(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
 			log.Warn(err)
 		} else {
-			log.Infof("[%s] pods cleaned for namespace %s", time.Now(), namespace.Name)
+			log.Infof("pods cleaned for namespace %s", namespace.Name)
+		}
+		if err := cs.CoreV1().Events(namespace.Name).DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+			log.Warn(err)
+		} else {
+			log.Infof("events cleaned for namespace %s", namespace.Name)
 		}
 	}
 	log.Info("Done cleaning resources")
