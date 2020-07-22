@@ -149,4 +149,4 @@ docker-compose up -d && echo "
 Kubernetes cluster up and running. Try it with kubectl: \"KUBECONFIG=kubeconfig.yaml kubectl get nodes\".
 Note that it may take a few minutes to initialize.
 
-To shut down the cluster and delete the images: docker-compose down --rmi all"
+To shut down the cluster and delete the containers: docker-compose down && docker rm \$(docker ps -aq)"

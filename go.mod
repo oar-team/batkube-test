@@ -3,6 +3,7 @@ module github.com/oar-team/batkube-test
 go 1.14
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/imdario/mergo v0.3.10 // indirect
 	github.com/mitchellh/mapstructure v1.3.2
 	github.com/sirupsen/logrus v1.6.0

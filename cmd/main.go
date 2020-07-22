@@ -9,13 +9,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -29,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialise kubernetes client
+	// Initialize kubernetes client
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		log.Fatal(err)
@@ -44,6 +47,7 @@ func main() {
 	pods := translateJobsToPods(&wl)
 	noMoreJobs := make(chan bool)
 	wg := sync.WaitGroup{}
+	initInformers(cs)
 	go func() {
 		defer wg.Done()
 		defer cleanupResources(cs)
@@ -190,8 +194,25 @@ value on noMoreJobs.
 */
 func getJobExecutionData(noMoreJobs chan bool) {
 	// TODO
-	time.Sleep(1 * time.Second)
+	time.Sleep(10000 * time.Second)
 	<-noMoreJobs
+}
+
+func initInformers(cs *kubernetes.Clientset) {
+	//TODO
+	factory := informers.NewSharedInformerFactory(cs, 0)
+	factory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			job, ok := newObj.(*v1.Pod)
+			if !ok {
+				log.Fatal("Got something else than a job in the informer")
+			}
+			spew.Dump(job)
+		},
+		AddFunc: func(obj interface{}) {
+			log.Info("new job added to store")
+		},
+	})
 }
 
 /*
