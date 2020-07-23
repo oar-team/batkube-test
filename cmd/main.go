@@ -56,6 +56,7 @@ type submitter struct {
 	events         chan *v1.Event
 	origin         time.Time
 	unfinishedJobs int
+	nodesId        map[string]int
 }
 
 func main() {
@@ -97,6 +98,7 @@ func main() {
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
 		csvData := initialState(&wl)
+		initNodesIds(s)
 		s.unfinishedJobs = len(csvData) - 1
 
 		wg := sync.WaitGroup{}
@@ -147,6 +149,7 @@ func newSubmitterForConfig(kubeconfig string) *submitter {
 		cs:         cs,
 		noMoreJobs: make(chan bool),
 		events:     make(chan *v1.Event),
+		nodesId:    make(map[string]int, 0),
 	}
 }
 
@@ -375,7 +378,7 @@ func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
 			log.Fatal(err)
 		}
 		jobLine[scheduledIndex] = timeToBatsimTime(time.Now(), s.origin)
-		jobLine[allocatedResourcesIndex] = pod.Spec.NodeName
+		jobLine[allocatedResourcesIndex] = fmt.Sprintf("%d", s.nodesId[pod.Spec.NodeName])
 	case "Pulling":
 		jobLine[pullingIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Pulled":
@@ -412,7 +415,7 @@ func cleanupResources(s *submitter) {
 	}
 	var zero int64
 	log.Infoln("Waiting a bit for resources to stabilize before cleaning...")
-	time.Sleep(1 * time.Second)
+	time.Sleep(3 * time.Second)
 	for _, namespace := range namespaces.Items {
 		// Ignore namespaces inherent to kubernetes
 		if namespace.Name == "kube-system" || namespace.Name == "kube-public" || namespace.Name == "kube-node-lease" {
@@ -435,6 +438,22 @@ func cleanupResources(s *submitter) {
 		}
 	}
 	log.Infoln("Waiting a bit for resources to finish cleaning...")
-	time.Sleep(1 * time.Second)
+	time.Sleep(3 * time.Second)
 	log.Info("Done cleaning resources")
+}
+
+// Generated nodes names do not have the right format. The csv requires a plain
+// id instead of a string
+func initNodesIds(s *submitter) {
+	nodes, err := s.cs.CoreV1().Nodes().List(s.ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var i int
+	for _, node := range nodes.Items {
+		if node.Status.String() == "Ready" {
+			s.nodesId[node.Name] = i
+			i++
+		}
+	}
 }
