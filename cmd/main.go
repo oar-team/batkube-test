@@ -95,6 +95,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	cleanupResources(s)
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
 		csvData := initialState(&wl)
@@ -361,6 +362,10 @@ func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
 			jobLine = line
 		}
 	}
+	// Some events are not related to jobs or pods
+	if len(jobLine) == 0 {
+		return
+	}
 
 	// Trying to use event.CreationTimestamp results in negative values
 	// when considering "origin" as the time origin. Maybe the api server's
@@ -451,6 +456,8 @@ func initNodesIds(s *submitter) {
 	}
 	var i int
 	for _, node := range nodes.Items {
+		// There may be some nodes left undeleted from previous
+		// experiences
 		if node.Status.String() == "Ready" {
 			s.nodesId[node.Name] = i
 			i++
