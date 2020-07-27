@@ -3,3 +3,4 @@ kubeconfig.yaml
 docker-compose.yaml
 expe-out
 workload.json
+workload.swf

@@ -1,12 +1,13 @@
 package main
 
 import (
-	"encoding/csv"
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 )
@@ -19,29 +20,34 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
 	f, err := os.Open(*filePath)
 	if err != nil {
 		panic(err)
 	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			panic(err)
+		}
+	}()
 
 	out, err := os.Create(*outPath)
 	if err != nil {
 		panic(err)
 	}
 
-	r := csv.NewReader(f)
-	r.Comment = ';'
-	r.Comma = ' '
+	scanner := bufio.NewScanner(f)
 
 	wl := translate.Workload{
 		NbRes:    1,
 		Jobs:     make([]translate.Job, 0),
 		Profiles: make(map[string]translate.Profile),
 	}
-	line, _ := r.Read()
-	for line != nil {
-		// There are many blank spaces
-		line = parseLine(line)
+	for scanner.Scan() {
+		line := parseLine(scanner.Text())
+		if line == nil {
+			continue
+		}
 
 		// Extract the necessary info
 		subtime, err := strconv.ParseFloat(line[1], 64)
@@ -76,8 +82,10 @@ func main() {
 			Profile: profileName,
 		}
 		wl.Jobs = append(wl.Jobs, job)
+	}
 
-		line, _ = r.Read()
+	if err = scanner.Err(); err != nil {
+		panic(err)
 	}
 
 	encoder := json.NewEncoder(out)
@@ -109,9 +117,14 @@ func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
 	}
 }
 
-func parseLine(line []string) []string {
+func parseLine(line string) []string {
+	if len(line) == 0 || line[0] == ';' {
+		return nil
+	}
 	formattedLine := make([]string, 0)
-	for _, col := range line {
+	line = strings.ReplaceAll(line, "\t", " ")
+	split := strings.Split(line, " ")
+	for _, col := range split {
 		if col != "" {
 			formattedLine = append(formattedLine, col)
 		}
