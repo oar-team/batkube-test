@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -43,53 +44,70 @@ func main() {
 		Jobs:     make([]translate.Job, 0),
 		Profiles: make(map[string]translate.Profile),
 	}
+
 	for scanner.Scan() {
-		line := parseLine(scanner.Text())
-		if line == nil {
-			continue
-		}
-
-		// Extract the necessary info
-		subtime, err := strconv.ParseFloat(line[1], 64)
-		if err != nil {
-			panic(err)
-		}
-		runTime, err := strconv.ParseFloat(line[3], 64)
-		if err != nil {
-			panic(err)
-		}
-		cpu := line[4]
-
-		// Create the profile if it does not exist
-		profileName := fmt.Sprintf("delay%f", runTime)
-		_, ok := wl.Profiles[profileName]
-		if !ok {
-			wl.Profiles[profileName] = translate.Profile{
-				Type: "delay",
-				Ret:  1,
-				Specs: map[string]interface{}{
-					"scheduler": "default",
-					"delay":     runTime,
-					"cpu":       cpu,
-				},
-			}
-		}
-
-		job := translate.Job{
-			Id:      line[0],
-			Subtime: subtime,
-			Res:     1,
-			Profile: profileName,
-		}
-		wl.Jobs = append(wl.Jobs, job)
+		parseLine(scanner.Text(), &wl)
 	}
-
 	if err = scanner.Err(); err != nil {
 		panic(err)
 	}
 
+	// offsets all jobs subtimes so the first job corresponds to the origin
+	if len(wl.Jobs) == 0 {
+		panic(errors.New("This workload has no jobs"))
+	}
+	offset := wl.Jobs[0].Subtime
+	for i := range wl.Jobs {
+		wl.Jobs[i].Subtime -= offset
+	}
+
 	encoder := json.NewEncoder(out)
 	encodeWorkload(&wl, encoder)
+}
+
+func parseLine(lineStr string, wl *translate.Workload) {
+	line := parseLineStringToSlice(lineStr)
+	if line == nil {
+		return
+	}
+
+	// Extract the necessary info
+	runTime, err := strconv.ParseFloat(line[3], 64)
+	if err != nil {
+		panic(err)
+	}
+	if runTime == float64(0) {
+		return
+	}
+
+	subtime, err := strconv.ParseFloat(line[1], 64)
+	if err != nil {
+		panic(err)
+	}
+	cpu := line[4]
+
+	// Create the profile if it does not exist
+	profileName := fmt.Sprintf("delay%f", runTime)
+	_, ok := wl.Profiles[profileName]
+	if !ok {
+		wl.Profiles[profileName] = translate.Profile{
+			Type: "delay",
+			Ret:  1,
+			Specs: map[string]interface{}{
+				"scheduler": "default",
+				"delay":     runTime,
+				"cpu":       cpu,
+			},
+		}
+	}
+
+	job := translate.Job{
+		Id:      line[0],
+		Subtime: subtime,
+		Res:     1,
+		Profile: profileName,
+	}
+	wl.Jobs = append(wl.Jobs, job)
 }
 
 /*
@@ -117,7 +135,7 @@ func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
 	}
 }
 
-func parseLine(line string) []string {
+func parseLineStringToSlice(line string) []string {
 	if len(line) == 0 || line[0] == ';' {
 		return nil
 	}
