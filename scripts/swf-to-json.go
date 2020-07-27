@@ -13,9 +13,13 @@ import (
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 )
 
+var normalize *float64
+var maxProcs float64 // to normalize cpu usage
+
 func main() {
 	filePath := flag.String("in", "", "input csv file with swf format")
 	outPath := flag.String("out", "", "output file")
+	normalize = flag.Float64("norm", 0, "normalize cpu usage between 0 and 1")
 	flag.Parse()
 	if *filePath == "" || *outPath == "" {
 		flag.Usage()
@@ -61,6 +65,17 @@ func main() {
 		wl.Jobs[i].Subtime -= offset
 	}
 
+	// Normalize cpu usage
+	for _, prof := range wl.Profiles {
+		if *normalize > 0 {
+			prof.Specs["cpu"] = *normalize * prof.Specs["cpu"].(float64) / maxProcs
+		}
+		if prof.Specs["cpu"].(float64) < 0.001 {
+			// resources requests can not be lower than 1m
+			prof.Specs["cpu"] = float64(0.001)
+		}
+	}
+
 	encoder := json.NewEncoder(out)
 	encodeWorkload(&wl, encoder)
 }
@@ -84,7 +99,10 @@ func parseLine(lineStr string, wl *translate.Workload) {
 	if err != nil {
 		panic(err)
 	}
-	cpu := line[4]
+	cpu, err := strconv.ParseFloat(line[4], 64)
+	if err != nil {
+		panic(err)
+	}
 
 	// Create the profile if it does not exist
 	profileName := fmt.Sprintf("delay%f", runTime)
@@ -135,9 +153,17 @@ func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
 }
 
 func parseLineStringToSlice(line string) []string {
+	var err error
 	if len(line) == 0 || line[0] == ';' {
+		if strings.Contains(line, "MaxProcs") {
+			maxProcs, err = strconv.ParseFloat(strings.Split(line, ": ")[1], 64)
+			if err != nil {
+				panic(err)
+			}
+		}
 		return nil
 	}
+
 	formattedLine := make([]string, 0)
 	line = strings.ReplaceAll(line, "\t", " ")
 	split := strings.Split(line, " ")
