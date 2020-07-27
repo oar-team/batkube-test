@@ -3,7 +3,6 @@ module github.com/oar-team/batkube-test
 go 1.14
 
 require (
-	github.com/davecgh/go-spew v1.1.1
 	github.com/imdario/mergo v0.3.10 // indirect
 	github.com/mitchellh/mapstructure v1.3.2
 	github.com/sirupsen/logrus v1.6.0
@@ -17,7 +16,7 @@ require (
 )
 
 replace (
-	gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube => gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200721143233-acc0de1ca11e
+	gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube => gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube.git v0.0.0-20200724163848-09dd32cf5c0d
 	k8s.io/api => k8s.io/api v0.18.0
 	k8s.io/apimachinery => k8s.io/apimachinery v0.18.2-beta.0
 	k8s.io/client-go => k8s.io/client-go v0.18.0

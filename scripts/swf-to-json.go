@@ -81,7 +81,30 @@ func main() {
 	}
 
 	encoder := json.NewEncoder(out)
-	if err = encoder.Encode(wl); err != nil {
+	encodeWorkload(&wl, encoder)
+}
+
+/*
+Workaround to the profile spec encoding problem.
+Works ONLY for workload consisting of delay profiles
+*/
+func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
+	wlMap := map[string]interface{}{
+		"nb_res":   wl.NbRes,
+		"jobs":     wl.Jobs,
+		"profiles": make(map[string]interface{}, 0),
+	}
+	for profName, prof := range wl.Profiles {
+		profMap := map[string]interface{}{
+			"type":      prof.Type,
+			"ret":       prof.Ret,
+			"delay":     prof.Specs["delay"],
+			"scheduler": prof.Specs["scheduler"],
+			"cpu":       prof.Specs["cpu"],
+		}
+		wlMap["profiles"].(map[string]interface{})[profName] = profMap
+	}
+	if err := e.Encode(wlMap); err != nil {
 		panic(err)
 	}
 }
