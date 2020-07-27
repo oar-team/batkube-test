@@ -123,7 +123,6 @@ func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
 	for profName, prof := range wl.Profiles {
 		profMap := map[string]interface{}{
 			"type":      prof.Type,
-			"ret":       prof.Ret,
 			"delay":     prof.Specs["delay"],
 			"scheduler": prof.Specs["scheduler"],
 			"cpu":       prof.Specs["cpu"],
