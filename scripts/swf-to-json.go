@@ -14,14 +14,21 @@ import (
 )
 
 var normalize *float64
+var uniform *float64
 var maxProcs float64 // to normalize cpu usage
 
 func main() {
 	filePath := flag.String("in", "", "input csv file with swf format")
 	outPath := flag.String("out", "", "output file")
 	normalize = flag.Float64("norm", 0, "normalize cpu usage between 0 and 1")
+	uniform = flag.Float64("uniform", 0, "uniformize cpu usage to given value")
 	flag.Parse()
 	if *filePath == "" || *outPath == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *normalize != 0 && *uniform != 0 {
+		fmt.Println("can't set both uniformize and normalize")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -69,6 +76,8 @@ func main() {
 	for _, prof := range wl.Profiles {
 		if *normalize > 0 {
 			prof.Specs["cpu"] = *normalize * prof.Specs["cpu"].(float64) / maxProcs
+		} else if *uniform > 0 {
+			prof.Specs["cpu"] = *uniform
 		}
 		if prof.Specs["cpu"].(float64) < 0.001 {
 			// resources requests can not be lower than 1m

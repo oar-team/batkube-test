@@ -88,18 +88,18 @@ func main() {
 	// Initialize
 	quit := make(chan struct{})
 	defer close(quit)
-	initEventInformer(s, quit)
+	s.initEventInformer(quit)
 
 	// Launch the experience
 	epochsValue, err := strconv.Atoi(*epochs)
 	if err != nil {
 		log.Fatal(err)
 	}
-	cleanupResources(s)
+	s.cleanupResources()
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
 		csvData := initialState(&wl)
-		initNodesIds(s)
+		s.initNodesIds()
 		s.unfinishedJobs = len(csvData) - 1
 
 		wg := sync.WaitGroup{}
@@ -107,12 +107,12 @@ func main() {
 		s.origin = time.Now()
 		go func() {
 			defer wg.Done()
-			defer cleanupResources(s)
-			runResourceWatcher(s, csvData)
+			defer s.cleanupResources()
+			s.runResourceWatcher(csvData)
 		}()
 		go func() {
 			defer wg.Done()
-			runPodSubmitter(s, pods)
+			s.runPodSubmitter(pods)
 		}()
 		wg.Wait()
 		computeRemainingData(csvData)
@@ -238,7 +238,7 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func runPodSubmitter(s *submitter, pods []*v1.Pod) {
+func (s *submitter) runPodSubmitter(pods []*v1.Pod) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
 
 	one := int32(1)
@@ -341,7 +341,7 @@ func computeRemainingData(csvData [][]string) {
 /*
 Continuously watches the cluster state and writes the events to csvData
 */
-func runResourceWatcher(s *submitter, csvData [][]string) {
+func (s *submitter) runResourceWatcher(csvData [][]string) {
 	var noMoreJobsBool bool
 	for s.unfinishedJobs > 0 || !noMoreJobsBool {
 		select {
@@ -349,12 +349,12 @@ func runResourceWatcher(s *submitter, csvData [][]string) {
 			noMoreJobsBool = true
 		case e := <-s.events:
 			log.Debugln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
-			handleEvent(s, csvData, e)
+			s.handleEvent(csvData, e)
 		}
 	}
 }
 
-func handleEvent(s *submitter, csvData [][]string, event *v1.Event) {
+func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
 	id := strings.Split(event.InvolvedObject.Name, "-")[1] // pods names
 	var jobLine []string
 	for _, line := range csvData {
@@ -400,7 +400,7 @@ func timeToBatsimTime(t time.Time, origin time.Time) string {
 	return fmt.Sprintf("%f", float64(t.Sub(origin).Round(time.Millisecond))/1e9)
 }
 
-func initEventInformer(s *submitter, quit chan struct{}) {
+func (s *submitter) initEventInformer(quit chan struct{}) {
 	factory := informers.NewSharedInformerFactory(s.cs, 0)
 	factory.Core().V1().Events().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -413,7 +413,7 @@ func initEventInformer(s *submitter, quit chan struct{}) {
 /*
 Cleans up the cluster resources in preparation for the next epoch
 */
-func cleanupResources(s *submitter) {
+func (s *submitter) cleanupResources() {
 	namespaces, err := s.cs.CoreV1().Namespaces().List(s.ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Fatal(err)
@@ -449,7 +449,7 @@ func cleanupResources(s *submitter) {
 
 // Generated nodes names do not have the right format. The csv requires a plain
 // id instead of a string
-func initNodesIds(s *submitter) {
+func (s *submitter) initNodesIds() {
 	nodes, err := s.cs.CoreV1().Nodes().List(s.ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Fatal(err)
