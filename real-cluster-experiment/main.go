@@ -99,7 +99,6 @@ func main() {
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
 		csvData := initialState(&wl)
-		s.initNodesIds()
 		s.unfinishedJobs = len(csvData) - 1
 
 		wg := sync.WaitGroup{}
@@ -360,7 +359,7 @@ func (s *submitter) runResourceWatcher(csvData [][]string) {
 					jobLine = line
 				}
 			}
-			log.Infoln("Job", jobName, "completed")
+			log.Infoln("Job", jobName, "Completed")
 			s.unfinishedJobs--
 			jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 		}
@@ -401,7 +400,13 @@ func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
 			log.Fatal(err)
 		}
 		jobLine[scheduledIndex] = timeToBatsimTime(time.Now(), s.origin)
-		jobLine[allocatedResourcesIndex] = fmt.Sprintf("%d", s.nodesId[pod.Spec.NodeName])
+		nodeId, ok := s.nodesId[pod.Spec.NodeName]
+		if !ok {
+			n := len(s.nodesId)
+			s.nodesId[pod.Spec.NodeName] = n
+			nodeId = n
+		}
+		jobLine[allocatedResourcesIndex] = fmt.Sprintf("%d", nodeId)
 	case "Pulling":
 		jobLine[pullingIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Pulled":
@@ -468,22 +473,4 @@ func (s *submitter) cleanupResources() {
 	log.Infoln("Waiting a bit for resources to finish cleaning...")
 	time.Sleep(3 * time.Second)
 	log.Info("Done cleaning resources")
-}
-
-// Generated nodes names do not have the right format. The csv requires a plain
-// id instead of a string
-func (s *submitter) initNodesIds() {
-	nodes, err := s.cs.CoreV1().Nodes().List(s.ctx, metav1.ListOptions{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	var i int
-	for _, node := range nodes.Items {
-		// There may be some nodes left undeleted from previous
-		// experiences
-		if node.Status.String() == "Ready" {
-			s.nodesId[node.Name] = i
-			i++
-		}
-	}
 }
