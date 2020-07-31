@@ -42,20 +42,28 @@ do
   esac
 done
 
-if [ -z $NODES ] || [ -z $CPU ] || [ -z $MEM ]
+if [ -z $NODES ]
 then
   echo "-n needs a plain number"
   exit
 fi
-if [ -z $CPU ] || [ -z $CPU ] || [ -z $MEM ]
+#if [ -z $CPU ]
+#then
+#  echo "--cpu needs a plain number"
+#  exit
+#fi
+#if [ -z $MEM ]
+#then
+#  echo "--mem needs a plain number. Given memory is in Kb."
+#  exit
+#fi
+if [ -z $CPU ]
 then
-  echo "--cpu needs a plain number"
-  exit
+  CPU=$CPU_HOST
 fi
-if [ -z $MEM ] || [ -z $CPU ] || [ -z $MEM ]
+if [ -z $MEM ]
 then
-  echo "--mem needs a plain number. Given memory is in Kb."
-  exit
+  MEM=$MEM_HOST
 fi
 
 if [ $CPU -gt $CPU_HOST ]

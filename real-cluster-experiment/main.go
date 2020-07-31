@@ -57,6 +57,7 @@ type submitter struct {
 	origin         time.Time
 	unfinishedJobs int
 	nodesId        map[string]int
+	jobCompletion  chan string
 }
 
 func main() {
@@ -69,7 +70,7 @@ func main() {
 	flag.Parse()
 	if *wlJson == "" || *kubeconfig == "" || *outDir == "" || *epochs == "" {
 		flag.Usage()
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	level, err := log.ParseLevel(*loglevel)
@@ -95,7 +96,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	s.cleanupResources()
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
 		csvData := initialState(&wl)
@@ -146,11 +146,12 @@ func newSubmitterForConfig(kubeconfig string) *submitter {
 	}
 
 	return &submitter{
-		ctx:        context.Background(),
-		cs:         cs,
-		noMoreJobs: make(chan bool),
-		events:     make(chan *v1.Event),
-		nodesId:    make(map[string]int, 0),
+		ctx:           context.Background(),
+		cs:            cs,
+		noMoreJobs:    make(chan bool),
+		events:        make(chan *v1.Event),
+		nodesId:       make(map[string]int, 0),
+		jobCompletion: make(chan string, 0),
 	}
 }
 
@@ -348,14 +349,30 @@ func (s *submitter) runResourceWatcher(csvData [][]string) {
 		case <-s.noMoreJobs:
 			noMoreJobsBool = true
 		case e := <-s.events:
-			log.Debugln(e.Reason, e.InvolvedObject.Kind, e.InvolvedObject.Name)
 			s.handleEvent(csvData, e)
+		case jobName := <-s.jobCompletion:
+			// This code duplicates on handleEvent. This is a
+			// hotfix to the lack of 'Completed' events issue.
+			id := jobName[3:]
+			var jobLine []string
+			for _, line := range csvData {
+				if line[0] == id {
+					jobLine = line
+				}
+			}
+			log.Infoln("Job", jobName, "completed")
+			s.unfinishedJobs--
+			jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 		}
 	}
 }
 
 func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
-	id := strings.Split(event.InvolvedObject.Name, "-")[1] // pods names
+	podNameSplt := strings.Split(event.InvolvedObject.Name, "-")
+	if len(podNameSplt) == 0 || podNameSplt[0] != "w0" {
+		return
+	}
+	id := podNameSplt[1]
 	var jobLine []string
 	for _, line := range csvData {
 		if line[0] == id {
@@ -366,15 +383,16 @@ func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
 	if len(jobLine) == 0 {
 		return
 	}
+	log.Debugln(event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name)
 
 	// Trying to use event.CreationTimestamp results in negative values
 	// when considering "origin" as the time origin. Maybe the api server's
 	// time is not entirely synchronized with this script's time.
 	// A slight overhead is then added to these times.
 	switch event.Reason {
-	case "Completed":
-		s.unfinishedJobs--
-		jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
+	//case "Completed":
+	//	s.unfinishedJobs--
+	//	jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "SuccessfulCreate":
 		jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
@@ -407,6 +425,16 @@ func (s *submitter) initEventInformer(quit chan struct{}) {
 			s.events <- obj.(*v1.Event)
 		},
 	})
+	factory.Batch().V1().Jobs().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			// Completions events are no longer sent so we need to
+			// find another way (workaround)
+			job := newObj.(*batchv1.Job)
+			if job.Status.Succeeded == 1 {
+				s.jobCompletion <- job.Name
+			}
+		},
+	})
 	factory.Start(quit)
 }
 
@@ -414,33 +442,28 @@ func (s *submitter) initEventInformer(quit chan struct{}) {
 Cleans up the cluster resources in preparation for the next epoch
 */
 func (s *submitter) cleanupResources() {
-	namespaces, err := s.cs.CoreV1().Namespaces().List(s.ctx, metav1.ListOptions{})
-	if err != nil {
-		log.Fatal(err)
-	}
 	var zero int64
 	log.Infoln("Waiting a bit for resources to stabilize before cleaning...")
 	time.Sleep(3 * time.Second)
-	for _, namespace := range namespaces.Items {
-		// Ignore namespaces inherent to kubernetes
-		if namespace.Name == "kube-system" || namespace.Name == "kube-public" || namespace.Name == "kube-node-lease" {
-			continue
-		}
-		if err := s.cs.BatchV1().Jobs(namespace.Name).DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-			log.Warn(err)
-		} else {
-			log.Infof("jobs cleaned for namespace %s", namespace.Name)
-		}
-		if err := s.cs.CoreV1().Pods(namespace.Name).DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-			log.Warn(err)
-		} else {
-			log.Infof("pods cleaned for namespace %s", namespace.Name)
-		}
-		if err := s.cs.CoreV1().Events(namespace.Name).DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-			log.Warn(err)
-		} else {
-			log.Infof("events cleaned for namespace %s", namespace.Name)
-		}
+	if err := s.cs.BatchV1().Jobs("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		log.Warn(err)
+	} else {
+		log.Infof("jobs cleaned")
+	}
+	if err := s.cs.CoreV1().Pods("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		log.Warn(err)
+	} else {
+		log.Infof("pods cleaned")
+	}
+	if err := s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		log.Warn(err)
+	} else {
+		log.Infof("core v1 events cleaned")
+	}
+	if err := s.cs.EventsV1beta1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
+		log.Warn(err)
+	} else {
+		log.Infof("events v1 beta 1 events cleaned")
 	}
 	log.Infoln("Waiting a bit for resources to finish cleaning...")
 	time.Sleep(3 * time.Second)
