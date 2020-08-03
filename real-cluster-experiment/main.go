@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
@@ -59,6 +58,12 @@ type submitter struct {
 	unfinishedJobs int
 	nodesId        map[string]int
 	jobCompletion  chan string
+	epoch          int
+}
+
+type csvStruct struct {
+	data [][]string
+	lock sync.Mutex
 }
 
 func main() {
@@ -82,6 +87,7 @@ func main() {
 	}
 
 	s := newSubmitterForConfig(*kubeconfig)
+	csv := csvStruct{}
 
 	// Parse workload
 	wl := parseFile(*wlJson)
@@ -95,30 +101,30 @@ func main() {
 	// Launch the experience
 	epochsValue, err := strconv.Atoi(*epochs)
 	check(err)
-	for i := 0; i < epochsValue; i++ {
-		log.Infof("\n========EPOCH %d========\n", i)
-		s.cleanupResources()
-		csvData := initialState(&wl)
-		s.unfinishedJobs = len(csvData) - 1
+	s.cleanupResources()
+	for s.epoch = 0; s.epoch < epochsValue; s.epoch++ {
+		log.Infof("\n========EPOCH %d========\n", s.epoch)
+		csv.data = initialState(&wl)
+		s.unfinishedJobs = len(csv.data) - 1
 
 		wg := sync.WaitGroup{}
 		wg.Add(2)
 		s.origin = time.Now()
 		go func() {
 			defer wg.Done()
-			defer s.cleanupResources()
-			s.runResourceWatcher(csvData)
+			s.runResourceWatcher(&csv)
 		}()
 		go func() {
 			defer wg.Done()
-			s.runPodSubmitter(pods)
+			s.runPodSubmitter(&csv, pods)
 		}()
 		wg.Wait()
-		computeRemainingData(csvData)
+		computeRemainingData(csv.data)
 
-		log.Infof("Epoch done in %s (%d jobs)\n", time.Now().Sub(s.origin), len(csvData)-1)
+		log.Infof("Epoch done in %s (%d jobs)\n", time.Now().Sub(s.origin), len(csv.data)-1)
 
-		writeCsv(csvData, *outDir, i)
+		writeCsv(csv.data, *outDir, s.epoch)
+		s.cleanupResources()
 	}
 }
 
@@ -226,7 +232,7 @@ func verifyJobSubmissionOrder(pods []*v1.Pod) {
 /*
 Submits the given jobs at the correct timestamps.
 */
-func (s *submitter) runPodSubmitter(pods []*v1.Pod) {
+func (s *submitter) runPodSubmitter(csv *csvStruct, pods []*v1.Pod) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
 
 	one := int32(1)
@@ -236,11 +242,13 @@ func (s *submitter) runPodSubmitter(pods []*v1.Pod) {
 		if time.Now().Before(offsettedSubTime) {
 			time.Sleep(offsettedSubTime.Sub(time.Now()))
 		}
+		// Job names have format "workload-epoch-jobId"
 		pod.Spec.RestartPolicy = v1.RestartPolicyOnFailure
-		if _, err := s.cs.BatchV1().Jobs(pod.Namespace).Create(s.ctx,
+		jobName := fmt.Sprintf("%s%d-%s", pod.Name[:3], s.epoch, pod.Name[3:])
+		_, err := s.cs.BatchV1().Jobs(pod.Namespace).Create(s.ctx,
 			&batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: pod.Name,
+					Name: jobName,
 				},
 				Spec: batchv1.JobSpec{
 					Completions:             &one,
@@ -251,11 +259,10 @@ func (s *submitter) runPodSubmitter(pods []*v1.Pod) {
 				},
 			},
 			metav1.CreateOptions{},
-		); err != nil {
-			log.Warnln(err)
-		} else {
-			log.Infof("job %s submitted\n", pod.Name)
-		}
+		)
+		check(err)
+		csv.write(csv.getLine(strings.Split(jobName, "-")[2]), submissionTimeIndex, timeToBatsimTime(time.Now(), s.origin))
+		log.Infof("job %s submitted\n", jobName)
 	}
 	s.noMoreJobs <- true
 }
@@ -289,6 +296,7 @@ func initialState(wl *translate.Workload) [][]string {
 	for i, job := range wl.Jobs {
 		csvData = append(csvData, make([]string, len(csvData[0])))
 		csvData[i+1][jobIdIndex] = job.Id
+		csvData[i+1][submissionTimeIndex] = fmt.Sprintf("%f", job.Subtime) // job subtime is already formatted in seconds
 		csvData[i+1][workloadNameIndex] = "w0"
 		csvData[i+1][profileIndex] = job.Profile
 		csvData[i+1][requestedNumberOfResourcesIndex] = "1"
@@ -297,7 +305,6 @@ func initialState(wl *translate.Workload) [][]string {
 		// TODO : handle pods finishing states
 		csvData[i+1][finalStateIndex] = "COMPLETED_SUCCESSFULLY"
 		csvData[i+1][successIndex] = "1"
-
 	}
 	return csvData
 }
@@ -323,7 +330,7 @@ func computeRemainingData(csvData [][]string) {
 /*
 Continuously watches the cluster state and writes the events to csvData
 */
-func (s *submitter) runResourceWatcher(csvData [][]string) {
+func (s *submitter) runResourceWatcher(csv *csvStruct) {
 	var noMoreJobsBool bool
 	for s.unfinishedJobs > 0 || !noMoreJobsBool {
 		if s.unfinishedJobs < 0 {
@@ -333,38 +340,36 @@ func (s *submitter) runResourceWatcher(csvData [][]string) {
 		case <-s.noMoreJobs:
 			noMoreJobsBool = true
 		case e := <-s.events:
-			s.handleEvent(csvData, e)
+			s.handleEvent(csv, e)
 		case jobName := <-s.jobCompletion:
 			// This code duplicates on handleEvent. This is a
 			// hotfix to the lack of 'Completed' events issue.
-			id := jobName[3:]
-			var jobLine []string
-			for _, line := range csvData {
-				if line[0] == id {
-					jobLine = line
-				}
+			sp := strings.Split(jobName, "-")
+			jobEpoch, err := strconv.Atoi(sp[1])
+			check(err)
+			if jobEpoch != s.epoch {
+				// There is an issue with this channel receiving
+				// updates from last epoch
+				continue
 			}
+			id := sp[2]
+			lineIndex := csv.getLine(id)
 			s.unfinishedJobs--
 			log.Infof("Job %s completed (%d jobs remaining)\n", jobName, s.unfinishedJobs)
-			jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
+			csv.write(lineIndex, finishTimeIndex, timeToBatsimTime(time.Now(), s.origin))
 		}
 	}
 }
 
-func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
+func (s *submitter) handleEvent(csv *csvStruct, event *v1.Event) {
 	podNameSplt := strings.Split(event.InvolvedObject.Name, "-")
 	if len(podNameSplt) == 0 || podNameSplt[0] != "w0" {
 		return
 	}
-	id := podNameSplt[1]
-	var jobLine []string
-	for _, line := range csvData {
-		if line[0] == id {
-			jobLine = line
-		}
-	}
+
+	lineIndex := csv.getLine(podNameSplt[2])
 	// Some events are not related to jobs or pods
-	if len(jobLine) == 0 {
+	if lineIndex == 0 {
 		return
 	}
 	log.Debugln(event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name)
@@ -377,27 +382,27 @@ func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
 	//case "Completed":
 	//	s.unfinishedJobs--
 	//	jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
-	case "SuccessfulCreate":
-		jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
+	//case "SuccessfulCreate":
+	//	jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
 		pod, err := s.cs.CoreV1().Pods(event.Namespace).Get(s.ctx, event.InvolvedObject.Name, metav1.GetOptions{})
 		check(err)
-		jobLine[scheduledIndex] = timeToBatsimTime(time.Now(), s.origin)
+		csv.write(lineIndex, scheduledIndex, timeToBatsimTime(time.Now(), s.origin))
 		nodeId, ok := s.nodesId[pod.Spec.NodeName]
 		if !ok {
 			n := len(s.nodesId)
 			s.nodesId[pod.Spec.NodeName] = n
 			nodeId = n
 		}
-		jobLine[allocatedResourcesIndex] = fmt.Sprintf("%d", nodeId)
+		csv.write(lineIndex, allocatedResourcesIndex, fmt.Sprintf("%d", nodeId))
 	case "Pulling":
-		jobLine[pullingIndex] = timeToBatsimTime(time.Now(), s.origin)
+		csv.write(lineIndex, pullingIndex, timeToBatsimTime(time.Now(), s.origin))
 	case "Pulled":
-		jobLine[pulledIndex] = timeToBatsimTime(time.Now(), s.origin)
+		csv.write(lineIndex, pulledIndex, timeToBatsimTime(time.Now(), s.origin))
 	case "Started":
-		jobLine[startingTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
+		csv.write(lineIndex, startingTimeIndex, timeToBatsimTime(time.Now(), s.origin))
 	case "Created":
-		jobLine[createdIndex] = timeToBatsimTime(time.Now(), s.origin)
+		csv.write(lineIndex, createdIndex, timeToBatsimTime(time.Now(), s.origin))
 	default:
 	}
 }
@@ -420,7 +425,6 @@ func (s *submitter) initEventInformer(quit chan struct{}) {
 			job := newObj.(*batchv1.Job)
 			if job.Status.Succeeded == 1 {
 				s.jobCompletion <- job.Name
-				spew.Dump(job)
 			}
 		},
 	})
@@ -486,4 +490,21 @@ func check(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (csv *csvStruct) write(line, col int, input string) {
+	csv.lock.Lock()
+	defer csv.lock.Unlock()
+	csv.data[line][col] = input
+}
+
+func (csv *csvStruct) getLine(id string) int {
+	csv.lock.Lock()
+	defer csv.lock.Unlock()
+	for i, line := range csv.data {
+		if line[0] == id {
+			return i
+		}
+	}
+	return 0
 }
