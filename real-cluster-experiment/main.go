@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
@@ -93,11 +94,10 @@ func main() {
 
 	// Launch the experience
 	epochsValue, err := strconv.Atoi(*epochs)
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 	for i := 0; i < epochsValue; i++ {
 		log.Infof("\n========EPOCH %d========\n", i)
+		s.cleanupResources()
 		csvData := initialState(&wl)
 		s.unfinishedJobs = len(csvData) - 1
 
@@ -116,6 +116,8 @@ func main() {
 		wg.Wait()
 		computeRemainingData(csvData)
 
+		log.Infof("Epoch done in %s (%d jobs)\n", time.Now().Sub(s.origin), len(csvData)-1)
+
 		writeCsv(csvData, *outDir, i)
 	}
 }
@@ -124,9 +126,7 @@ func writeCsv(csvData [][]string, outDir string, epoch int) {
 	dir := path.Dir(outDir)
 	prefix := path.Base(outDir)
 	f, err := os.Create(path.Join(dir, prefix+fmt.Sprintf("%d", epoch)+"_jobs.csv"))
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 	log.Infoln("Writing output to", f.Name())
 	w := csv.NewWriter(f)
 	if err := w.WriteAll(csvData); err != nil {
@@ -136,13 +136,9 @@ func writeCsv(csvData [][]string, outDir string, epoch int) {
 
 func newSubmitterForConfig(kubeconfig string) *submitter {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 	cs, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 
 	return &submitter{
 		ctx:           context.Background(),
@@ -159,17 +155,13 @@ Parses a workload file into a byte array
 */
 func parseFile(file string) translate.Workload {
 	wlFile, err := os.Open(file)
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 	decoder := json.NewDecoder(wlFile)
 
 	// First step : decode into a map
 	jsonData := make(map[string]interface{}, 0)
 	err = decoder.Decode(&jsonData)
-	if err != nil {
-		log.Fatal(err)
-	}
+	check(err)
 
 	// Second step : decode again into a workload and decode profiles.
 	wl := translate.Workload{}
@@ -206,17 +198,13 @@ func translateJobsToPods(wl *translate.Workload) []*v1.Pod {
 		// JobToPod takes as input a JOB_SUBMITTED event, where the id is workload!jobId.
 		job.Id = "w0!" + job.Id
 		err, pod := translate.JobToPod(job, simData)
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 
 		// models.IoK8sAPICoreV1Pod -> v1.Pod
 		// Translation is done thanks to the json tags that remain the same.
 		corev1Pod := v1.Pod{}
 		podBytes, err := json.Marshal(pod)
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 		if err = json.Unmarshal(podBytes, &corev1Pod); err != nil {
 			log.Fatal(err)
 		}
@@ -266,7 +254,7 @@ func (s *submitter) runPodSubmitter(pods []*v1.Pod) {
 		); err != nil {
 			log.Warnln(err)
 		} else {
-			log.Infof("job %s submitted", pod.Name)
+			log.Infof("job %s submitted\n", pod.Name)
 		}
 	}
 	s.noMoreJobs <- true
@@ -317,17 +305,11 @@ func initialState(wl *translate.Workload) [][]string {
 func computeRemainingData(csvData [][]string) {
 	for _, line := range csvData[1:] {
 		startingTime, err := strconv.ParseFloat(line[startingTimeIndex], 64)
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 		finishingTime, err := strconv.ParseFloat(line[finishTimeIndex], 64)
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 		submissionTime, err := strconv.ParseFloat(line[submissionTimeIndex], 64)
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 		waitingTime := startingTime - submissionTime
 		executionTime := finishingTime - startingTime
 
@@ -344,6 +326,9 @@ Continuously watches the cluster state and writes the events to csvData
 func (s *submitter) runResourceWatcher(csvData [][]string) {
 	var noMoreJobsBool bool
 	for s.unfinishedJobs > 0 || !noMoreJobsBool {
+		if s.unfinishedJobs < 0 {
+			log.Fatal("Numer of unfinishedJobs is negative")
+		}
 		select {
 		case <-s.noMoreJobs:
 			noMoreJobsBool = true
@@ -359,8 +344,8 @@ func (s *submitter) runResourceWatcher(csvData [][]string) {
 					jobLine = line
 				}
 			}
-			log.Infoln("Job", jobName, "Completed")
 			s.unfinishedJobs--
+			log.Infof("Job %s completed (%d jobs remaining)\n", jobName, s.unfinishedJobs)
 			jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 		}
 	}
@@ -396,9 +381,7 @@ func (s *submitter) handleEvent(csvData [][]string, event *v1.Event) {
 		jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
 		pod, err := s.cs.CoreV1().Pods(event.Namespace).Get(s.ctx, event.InvolvedObject.Name, metav1.GetOptions{})
-		if err != nil {
-			log.Fatal(err)
-		}
+		check(err)
 		jobLine[scheduledIndex] = timeToBatsimTime(time.Now(), s.origin)
 		nodeId, ok := s.nodesId[pod.Spec.NodeName]
 		if !ok {
@@ -433,10 +416,11 @@ func (s *submitter) initEventInformer(quit chan struct{}) {
 	factory.Batch().V1().Jobs().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			// Completions events are no longer sent so we need to
-			// find another way (workaround)
+			// find another way
 			job := newObj.(*batchv1.Job)
 			if job.Status.Succeeded == 1 {
 				s.jobCompletion <- job.Name
+				spew.Dump(job)
 			}
 		},
 	})
@@ -449,28 +433,57 @@ Cleans up the cluster resources in preparation for the next epoch
 func (s *submitter) cleanupResources() {
 	var zero int64
 	log.Infoln("Waiting a bit for resources to stabilize before cleaning...")
-	time.Sleep(3 * time.Second)
-	if err := s.cs.BatchV1().Jobs("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-		log.Warn(err)
-	} else {
-		log.Infof("jobs cleaned")
+	time.Sleep(10 * time.Second)
+
+	log.Infoln("cleaning jobs...")
+	check(s.cs.BatchV1().Jobs("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+	time.Sleep(1 * time.Second)
+	jobList, err := s.cs.BatchV1().Jobs("default").List(s.ctx, metav1.ListOptions{})
+	for err == nil && len(jobList.Items) > 0 {
+		check(s.cs.BatchV1().Jobs("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+		time.Sleep(1 * time.Second)
+		jobList, err = s.cs.BatchV1().Jobs("default").List(s.ctx, metav1.ListOptions{})
 	}
-	if err := s.cs.CoreV1().Pods("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-		log.Warn(err)
-	} else {
-		log.Infof("pods cleaned")
+	check(err)
+
+	log.Infoln("cleaning pods...")
+	check(s.cs.CoreV1().Pods("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+	time.Sleep(1 * time.Second)
+	podList, err := s.cs.CoreV1().Pods("default").List(s.ctx, metav1.ListOptions{})
+	for err == nil && len(podList.Items) > 0 {
+		check(s.cs.CoreV1().Pods("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+		time.Sleep(1 * time.Second)
+		podList, err = s.cs.CoreV1().Pods("default").List(s.ctx, metav1.ListOptions{})
 	}
-	if err := s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-		log.Warn(err)
-	} else {
-		log.Infof("core v1 events cleaned")
+	check(err)
+
+	log.Infoln("cleaning core v1 events...")
+	check(s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+	time.Sleep(1 * time.Second)
+	coreEventList, err := s.cs.CoreV1().Events("default").List(s.ctx, metav1.ListOptions{})
+	for err == nil && len(coreEventList.Items) > 0 {
+		check(s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+		time.Sleep(1 * time.Second)
+		coreEventList, err = s.cs.CoreV1().Events("default").List(s.ctx, metav1.ListOptions{})
 	}
-	if err := s.cs.EventsV1beta1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}); err != nil {
-		log.Warn(err)
-	} else {
-		log.Infof("events v1 beta 1 events cleaned")
+	check(err)
+
+	log.Infoln("cleaning events v1 beta 1 events...")
+	check(s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+	time.Sleep(1 * time.Second)
+	eventList, err := s.cs.EventsV1beta1().Events("default").List(s.ctx, metav1.ListOptions{})
+	for err == nil && len(eventList.Items) > 0 {
+		check(s.cs.CoreV1().Events("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
+		time.Sleep(1 * time.Second)
+		eventList, err = s.cs.EventsV1beta1().Events("default").List(s.ctx, metav1.ListOptions{})
 	}
-	log.Infoln("Waiting a bit for resources to finish cleaning...")
-	time.Sleep(3 * time.Second)
+	check(err)
+
 	log.Info("Done cleaning resources")
+}
+
+func check(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
 }
