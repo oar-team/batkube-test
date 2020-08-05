@@ -4,3 +4,6 @@ docker-compose.yaml
 expe-out
 workload.json
 workload.swf
+batsim.log
+batkube.log
+scheduler.log

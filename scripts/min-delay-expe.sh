@@ -33,13 +33,14 @@ killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
-step_start=$(( ($END-$START)/$N ))
+step=$(( ($END-$START)/$N ))
 
 delay=$START
 j=0
+step_start=$(date +%s.%N)
 while [ $delay -lt $END ]; do
 
-  echo "=======delay = $delay (from $START to $END, step $j out of $N)======="
+  echo "=======min-delay = $delay (from $START to $END, step $j out of $N)======="
   echo
 
   successes=0
@@ -49,37 +50,42 @@ while [ $delay -lt $END ]; do
   i=0
   step_start=$(date +%s.%N)
   while [ $i -lt $PASSES ]; do
+    echo "" > batsim.log
+    echo "" > scheduler.log
+    echo "" > batkube.log
+
     echo "Pass $(( $i + 1 )) out of $PASSES"
 
     echo "Launching Batkube and the scheduler"
-    $SCHED --kubeconfig="$KUBECONFIG" --kube-api-content-type=application/json --leader-elect=false --scheduler-name=default > /dev/null 2>&1 &
+    $SCHED --kubeconfig="$KUBECONFIG" --kube-api-content-type=application/json --leader-elect=false --scheduler-name=default > scheduler.log 2>&1 &
     sched_pid=$!
 
-    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay "$delay"ms > /dev/null 2>&1 &
+    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay "$delay"ms > batkube.log 2>&1 &
     batkube_pid=$!
     sleep 4 # give time for the api to start
 
     echo "Simulation starts"
     start=$(date +%s.%N)
-    batsim -p "$P" -w "$W" -e "expe-out/min-delay" --enable-compute-sharing > /dev/null 2>&1 &
+    batsim -p "$P" -w "$W" -e "expe-out/min-delay" --enable-compute-sharing > batsim.log 2>&1 &
     batsim_pid=$!
 
     wait $batkube_pid
     exit_code=$?
     duration=$(echo "$(date +%s.%N) - $start" | bc)
 
-    echo "Result : exit code $exit_code; simulation time $duration"
+    echo "Result: exit code $exit_code; simulation time $duration"
 
     kill $sched_pid > /dev/null 2>&1
     kill $batkube_pid > /dev/null 2>&1
     kill $batsim_pid > /dev/null 2>&1
 
     if [ $exit_code -gt 1 ]; then
-      echo "Unexpected exit code from Batkube: $exit_code"
-      exit 1
+      echo "Unexpected exit code from Batkube: $exit_code. Retrying."
+      echo
+      continue
     fi
     ((successes+= 1 - exit_code))
-    if [ $exit_code ]; then
+    if [ $exit_code -eq 1 ]; then
       total_failure_sim_time=$(echo "scale=3; $total_failure_sim_time + $duration" | bc)
     else
       total_success_sim_time=$(echo "scale=3; $total_success_sim_time + $duration" | bc)
@@ -101,6 +107,6 @@ while [ $delay -lt $END ]; do
   echo "Avg success sim time $mean_success_sim_time"
   echo "Avg failure sim time $mean_failure_sim_time"
 
-  delay=$(( $delay + $step ))
+  ((delay+=$step))
   echo
 done
