@@ -234,6 +234,7 @@ Submits the given jobs at the correct timestamps.
 */
 func (s *submitter) runPodSubmitter(csv *csvStruct, pods []*v1.Pod) {
 	verifyJobSubmissionOrder(pods) // pods need to be ordered by submission time
+	wg := sync.WaitGroup{}
 
 	one := int32(1)
 	var zero int32
@@ -242,28 +243,33 @@ func (s *submitter) runPodSubmitter(csv *csvStruct, pods []*v1.Pod) {
 		if time.Now().Before(offsettedSubTime) {
 			time.Sleep(offsettedSubTime.Sub(time.Now()))
 		}
-		// Job names have format "workload-epoch-jobId"
-		pod.Spec.RestartPolicy = v1.RestartPolicyOnFailure
-		jobName := fmt.Sprintf("%s%d-%s", pod.Name[:3], s.epoch, pod.Name[3:])
-		_, err := s.cs.BatchV1().Jobs(pod.Namespace).Create(s.ctx,
-			&batchv1.Job{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: jobName,
-				},
-				Spec: batchv1.JobSpec{
-					Completions:             &one,
-					TTLSecondsAfterFinished: &zero,
-					Template: v1.PodTemplateSpec{
-						Spec: pod.Spec,
+		go func(pod *v1.Pod) {
+			wg.Add(1)
+			defer wg.Done()
+			// Job names have format "workload-epoch-jobId"
+			pod.Spec.RestartPolicy = v1.RestartPolicyOnFailure
+			jobName := fmt.Sprintf("%s%d-%s", pod.Name[:3], s.epoch, pod.Name[3:])
+			_, err := s.cs.BatchV1().Jobs(pod.Namespace).Create(s.ctx,
+				&batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: jobName,
+					},
+					Spec: batchv1.JobSpec{
+						Completions:             &one,
+						TTLSecondsAfterFinished: &zero,
+						Template: v1.PodTemplateSpec{
+							Spec: pod.Spec,
+						},
 					},
 				},
-			},
-			metav1.CreateOptions{},
-		)
-		check(err)
-		csv.write(csv.getLine(strings.Split(jobName, "-")[2]), submissionTimeIndex, timeToBatsimTime(time.Now(), s.origin))
-		log.Infof("job %s submitted\n", jobName)
+				metav1.CreateOptions{},
+			)
+			check(err)
+			csv.write(csv.getLine(strings.Split(jobName, "-")[2]), submissionTimeIndex, timeToBatsimTime(time.Now(), s.origin))
+			log.Infof("job %s submitted\n", jobName)
+		}(pod)
 	}
+	wg.Wait()
 	s.noMoreJobs <- true
 }
 
@@ -374,16 +380,7 @@ func (s *submitter) handleEvent(csv *csvStruct, event *v1.Event) {
 	}
 	log.Debugln(event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name)
 
-	// Trying to use event.CreationTimestamp results in negative values
-	// when considering "origin" as the time origin. Maybe the api server's
-	// time is not entirely synchronized with this script's time.
-	// A slight overhead is then added to these times.
 	switch event.Reason {
-	//case "Completed":
-	//	s.unfinishedJobs--
-	//	jobLine[finishTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
-	//case "SuccessfulCreate":
-	//	jobLine[submissionTimeIndex] = timeToBatsimTime(time.Now(), s.origin)
 	case "Scheduled":
 		pod, err := s.cs.CoreV1().Pods(event.Namespace).Get(s.ctx, event.InvolvedObject.Name, metav1.GetOptions{})
 		check(err)
@@ -437,7 +434,7 @@ Cleans up the cluster resources in preparation for the next epoch
 func (s *submitter) cleanupResources() {
 	var zero int64
 	log.Infoln("Waiting a bit for resources to stabilize before cleaning...")
-	time.Sleep(10 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	log.Infoln("cleaning jobs...")
 	check(s.cs.BatchV1().Jobs("default").DeleteCollection(s.ctx, metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{}))
