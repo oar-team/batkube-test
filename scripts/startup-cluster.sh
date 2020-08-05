@@ -97,6 +97,7 @@ then
 fi
 
 touch docker-compose.yaml
+echo "" > docker-compose.yaml
 
 echo "version: '3'
 services:
@@ -117,14 +118,9 @@ services:
     # This is just so that we get the kubeconfig file out
     - .:/output
     ports:
-    - 6443:6443">> ./docker-compose.yaml
+    - 6443:6443
 
-i=0
-while [ $i -lt $NODES ]
-do
-
-  echo "
-  agent$i:
+  agent:
     image: \"rancher/k3s:\${K3S_VERSION:-latest}\"
     command: agent --kubelet-arg \"system-reserved=cpu=$(($CPU_HOST - $CPU)),memory=$(($MEM_HOST - $MEM))Ki\"
     tmpfs:
@@ -133,11 +129,8 @@ do
     privileged: true
     environment:
     - K3S_URL=https://server:6443
-    - K3S_TOKEN=$K3S_TOKEN">> ./docker-compose.yaml
-    i=$(($i + 1 ))
-done
+    - K3S_TOKEN=$K3S_TOKEN
 
-echo "
 volumes:
   k3s-server: {}" >> ./docker-compose.yaml
 
@@ -153,7 +146,7 @@ then
   echo
 fi
 
-docker-compose up -d && echo "
+docker-compose up --scale agent=$NODES -d && echo "
 Kubernetes cluster up and running. Try it with kubectl: \"KUBECONFIG=kubeconfig.yaml kubectl get nodes\".
 Note that it may take a few minutes to initialize.
 

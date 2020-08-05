@@ -27,7 +27,7 @@ fi
 
 
 touch "$OUT"
-echo "id success_rate mean_success_sim_time mean_failure_sim_time" > $OUT
+echo "delay success_rate mean_failure_sim_time mean_success_sim_time" > $OUT
 
 killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
@@ -37,7 +37,7 @@ step=$(( ($END-$START)/$N ))
 
 delay=$START
 j=0
-step_start=$(date +%s.%N)
+exp_start=$(date +%s.%N)
 while [ $delay -lt $END ]; do
 
   echo "=======min-delay = $delay (from $START to $END, step $j out of $N)======="
@@ -97,10 +97,14 @@ while [ $delay -lt $END ]; do
 
   step_duration=$(echo "$(date +%s.%N) - $step_start" | bc)
   success_rate=$(echo "scale=2; $successes / $PASSES" | bc)
-  mean_success_sim_time=$(echo "scale=3; $total_success_sim_time / $PASSES" | bc)
-  mean_failure_sim_time=$(echo "scale=3; $total_failure_sim_time / $PASSES" | bc)
+  if [ $successes -gt 0 ]; then
+    mean_success_sim_time=$(echo "scale=3; $total_success_sim_time / $successes" | bc)
+  else
+    mean_success_sim_time=0
+  fi
+  mean_failure_sim_time=$(echo "scale=3; $total_failure_sim_time / ($PASSES-$successes)" | bc)
   ((j++))
-  echo "$j $success_rate $mean_failure_sim_time $mean_success_sim_time" >> $OUT
+  echo "$delay $success_rate $mean_failure_sim_time $mean_success_sim_time" >> $OUT
 
   echo "Step done in $step_duration s"
   echo "Success rate $success_rate"
@@ -110,3 +114,6 @@ while [ $delay -lt $END ]; do
   ((delay+=$step))
   echo
 done
+
+exp_duration=$(echo "$(date +%s.%N) - $exp_start" | bc)
+echo "Experience lasted $exp_duration s"
