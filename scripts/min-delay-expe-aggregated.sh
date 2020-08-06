@@ -12,7 +12,7 @@ END=50
 STEP=1
 PASSES=20 # number of trials per point
 
-OUT="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
+OUT="expe-out/min-delay-$(basename $W | cut -f 1 -d '.')-aggregated.csv"
 
 if [ -f "$OUT" ]; then
   echo "$OUT already exists."
@@ -39,7 +39,7 @@ j=0
 exp_start=$(date +%s.%N)
 while [ $delay -lt $END ]; do
 
-  echo -e "\n=======min-delay=${delay}ms (step $j/$n)======="
+  echo -e "\n=======min-delay=${delay}ms (step (($j+1))/$n)======="
 
   successes=0
   total_success_sim_time=0
@@ -88,7 +88,7 @@ while [ $delay -lt $END ]; do
       continue
 
     if [ $exit_code -eq 1 ]; then
-      echo "failed (${duration}s)"
+      echo -n "failed"
       total_failure_sim_time=$(echo "scale=3; $total_failure_sim_time + $duration" | bc)
 
       [ "$(echo "$duration > $max_failure_sim_time" | bc)" -eq 1 ] && \
@@ -99,7 +99,7 @@ while [ $delay -lt $END ]; do
         min_failure_sim_time=$duration
 
     else
-      echo "passed (${duration}s)"
+      echo "passed"
       ((successes++))
       total_success_sim_time=$(echo "scale=3; $total_success_sim_time + $duration" | bc)
 
@@ -110,6 +110,7 @@ while [ $delay -lt $END ]; do
         "$(echo "$min_success_sim_time == 0" | bc)" -eq 1 ] && \
         min_success_sim_time=$duration
     fi
+    echo " (${duration}s)"
 
     ((i++))
   done
@@ -126,7 +127,11 @@ while [ $delay -lt $END ]; do
   else
     mean_success_sim_time=0
   fi
-  mean_failure_sim_time=$(echo "scale=3; $total_failure_sim_time / ($PASSES-$successes)" | bc)
+  if [ $successes -lt $PASSES ]; then
+    mean_failure_sim_time=$(echo "scale=3; $total_failure_sim_time / ($PASSES-$successes)" | bc)
+  else
+    mean_failure_sim_time=0
+  fi
   ((j++))
   echo "$delay $success_rate $mean_failure_sim_time $min_failure_sim_time $max_failure_sim_time $mean_success_sim_time $min_success_sim_time $max_success_sim_time" >> $OUT
 
@@ -136,7 +141,7 @@ while [ $delay -lt $END ]; do
   echo "Avg failure sim time $mean_failure_sim_time"
 
   rough_eta=$(echo "$step_duration * ($n - $j)" | bc)
-  echo -e "\nETA: $(date -d@$rough_eta -u +%Hh%Mh%Ss)"
+  echo -e "\nETA: $(date -d@$rough_eta -u +%Hh%Mh%Ss) ($(date --date="${rough_eta} seconds"))"
 
   ((delay+=$STEP))
 done
