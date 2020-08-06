@@ -1,18 +1,18 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/spaced_50_delay200.json
+W=../batkube/examples/workloads/200_delay170.json
 P=../batkube/examples/platforms/platform_graphene_16nodes.xml
 SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
 BATKUBE=../batkube/batkube
 
 # min delay starting and ending values in ms
-START=40
+START=0
 END=50
-STEP=1
-PASSES=5 # number of trials per point
+STEP=5
+PASSES=15 # number of trials per point
 
-out="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
+out="results/min-delay-$(basename $W | cut -f 1 -d '.').csv"
 
 if [ -f "$out" ]; then
   echo "$out already exists."
@@ -32,12 +32,12 @@ killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
-n=$(echo "scale=0; ($END - $START) / $STEP" | bc)
+n=$(echo "scale=0; ($END - $START) / $STEP + 1" | bc)
 
 delay=$START
 j=0
 exp_start=$(date +%s.%N)
-while [ $delay -lt $END ]; do
+while [ $delay -le $END ]; do
 
   echo -e "\n=======min-delay=${delay}ms (step $(( $j+1 ))/$n)======="
 
@@ -64,7 +64,7 @@ while [ $delay -lt $END ]; do
 
     $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay "$delay"ms > batkube.log 2>&1 &
     batkube_pid=$!
-    sleep 4 # give time for the api to start
+    sleep 5 # give time for the api to start
 
     start=$(date +%s.%N)
     batsim -p "$P" -w "$W" -e "expe-out/min-delay" --enable-compute-sharing > batsim.log 2>&1 &
