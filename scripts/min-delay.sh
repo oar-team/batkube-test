@@ -1,6 +1,6 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/spaced_200_delay170.json
+W=../batkube/examples/workloads/200_delay170.json
 P=../batkube/examples/platforms/platform_graphene_16nodes.xml
 SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
@@ -9,10 +9,10 @@ BATKUBE=../batkube/batkube
 # min delay starting and ending values in ms
 START=0
 END=50
-STEP=1
-PASSES=20 # number of trials per point
+STEP=5
+PASSES=15 # number of trials per point
 
-out="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
+out="results/min-delay-$(basename $W | cut -f 1 -d '.').csv"
 
 if [ -f "$out" ]; then
   echo "$out already exists."
@@ -32,15 +32,16 @@ killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
-n=$(echo "scale=0; ($END - $START) / $STEP" | bc)
+n=$(echo "scale=0; ($END - $START) / $STEP + 1" | bc)
 
 delay=$START
 j=0
 exp_start=$(date +%s.%N)
-while [ $delay -lt $END ]; do
+while [ $delay -le $END ]; do
 
-  echo -e "\n=======min-delay=${delay}ms (step (($j+1))/$n)======="
+  echo -e "\n=======min-delay=${delay}ms (step $(( $j+1 ))/$n)======="
 
+  successes=0
   total_success_sim_time=0
 
   echo "" > batsim.log
@@ -50,6 +51,7 @@ while [ $delay -lt $END ]; do
   i=0
   step_start=$(date +%s.%N)
   while [ $i -lt $PASSES ]; do
+    pass_start=$(date +%s.%N)
     echo -n "Pass $(( $i + 1 )) out of $PASSES..."
 
     while [ "$(lsof -i -P -n | grep :27000 | wc -l)" -eq 1 ]; do
@@ -62,7 +64,7 @@ while [ $delay -lt $END ]; do
 
     $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay "$delay"ms > batkube.log 2>&1 &
     batkube_pid=$!
-    sleep 4 # give time for the api to start
+    sleep 5 # give time for the api to start
 
     start=$(date +%s.%N)
     batsim -p "$P" -w "$W" -e "expe-out/min-delay" --enable-compute-sharing > batsim.log 2>&1 &
@@ -81,8 +83,14 @@ while [ $delay -lt $END ]; do
       echo "Unexpected exit code from Batkube: $exit_code. Retrying." && \
       continue
 
+    ([ $exit_code -eq 0 ] && echo -n "passed") || echo -n "failed"
+    # successes=$(( $successes + 1 - $exit_code ))
+    ((successes+= 1 - $exit_code))
+    total_success_sim_time=$(echo "$total_success_sim_time + $duration" | bc)
+
     echo "$delay $exit_code $duration" >> $out
 
+    echo " (sim ${duration}s, total $(echo "$(date +%s.%N) - $pass_start" | bc)s)"
     ((i++))
   done
 

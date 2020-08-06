@@ -20,7 +20,7 @@ var maxProcs float64 // to normalize cpu usage
 func main() {
 	filePath := flag.String("in", "", "input csv file with swf format")
 	outPath := flag.String("out", "", "output file")
-	normalize = flag.Float64("norm", 0, "normalize cpu usage between 0 and 1")
+	normalize = flag.Float64("norm", 0, "normalize cpu usage between 0 and input value")
 	uniform = flag.Float64("uniform", 0, "uniformize cpu usage to given value")
 	flag.Parse()
 	if *filePath == "" || *outPath == "" {
