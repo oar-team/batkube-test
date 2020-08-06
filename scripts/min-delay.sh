@@ -1,16 +1,16 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/spaced_200_delay170.json
+W=../batkube/examples/workloads/spaced_50_delay200.json
 P=../batkube/examples/platforms/platform_graphene_16nodes.xml
 SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
 BATKUBE=../batkube/batkube
 
 # min delay starting and ending values in ms
-START=0
+START=40
 END=50
 STEP=1
-PASSES=20 # number of trials per point
+PASSES=5 # number of trials per point
 
 out="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
 
@@ -39,8 +39,9 @@ j=0
 exp_start=$(date +%s.%N)
 while [ $delay -lt $END ]; do
 
-  echo -e "\n=======min-delay=${delay}ms (step (($j+1))/$n)======="
+  echo -e "\n=======min-delay=${delay}ms (step $(( $j+1 ))/$n)======="
 
+  successes=0
   total_success_sim_time=0
 
   echo "" > batsim.log
@@ -50,6 +51,7 @@ while [ $delay -lt $END ]; do
   i=0
   step_start=$(date +%s.%N)
   while [ $i -lt $PASSES ]; do
+    pass_start=$(date +%s.%N)
     echo -n "Pass $(( $i + 1 )) out of $PASSES..."
 
     while [ "$(lsof -i -P -n | grep :27000 | wc -l)" -eq 1 ]; do
@@ -81,8 +83,14 @@ while [ $delay -lt $END ]; do
       echo "Unexpected exit code from Batkube: $exit_code. Retrying." && \
       continue
 
+    ([ $exit_code -eq 0 ] && echo -n "passed") || echo -n "failed"
+    # successes=$(( $successes + 1 - $exit_code ))
+    ((successes+= 1 - $exit_code))
+    total_success_sim_time=$(echo "$total_success_sim_time + $duration" | bc)
+
     echo "$delay $exit_code $duration" >> $out
 
+    echo " (sim ${duration}s, total $(echo "$(date +%s.%N) - $pass_start" | bc)s)"
     ((i++))
   done
 
