@@ -13,15 +13,14 @@ import (
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 )
 
-var normalize *float64
-var uniform *float64
 var maxProcs float64 // to normalize cpu usage
 
 func main() {
 	filePath := flag.String("in", "", "input csv file with swf format")
 	outPath := flag.String("out", "", "output file")
-	normalize = flag.Float64("norm", 0, "normalize cpu usage between 0 and input value")
-	uniform = flag.Float64("uniform", 0, "uniformize cpu usage to given value")
+	normalize := flag.Float64("norm", 0, "normalize cpu usage between 0 and input value")
+	uniform := flag.Float64("uniform", 0, "uniformize cpu usage to given value")
+	trim := flag.Duration("trim", 0, "trim job durations to keep them under this value")
 	flag.Parse()
 	if *filePath == "" || *outPath == "" {
 		flag.Usage()
@@ -32,6 +31,8 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
+	trimFloat := float64(*trim) / 1e9
 
 	f, err := os.Open(*filePath)
 	if err != nil {
@@ -82,6 +83,9 @@ func main() {
 		if prof.Specs["cpu"].(float64) < 0.001 {
 			// resources requests can not be lower than 1m
 			prof.Specs["cpu"] = float64(0.001)
+		}
+		if *trim > 0 && prof.Specs["delay"].(float64) > trimFloat {
+			prof.Specs["delay"] = trimFloat
 		}
 	}
 
