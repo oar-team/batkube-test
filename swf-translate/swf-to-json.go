@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
 )
 
-var maxProcs float64 // to normalize cpu usage
+var maxCPU float64 // to normalize cpu usage
 
 func main() {
 	filePath := flag.String("in", "", "input csv file with swf format")
@@ -73,10 +74,17 @@ func main() {
 		wl.Jobs[i].Subtime -= offset
 	}
 
+	for _, prof := range wl.Profiles {
+		cpu := prof.Specs["cpu"].(float64)
+		if cpu > maxCPU {
+			maxCPU = cpu
+		}
+	}
+
 	// Normalize cpu usage
 	for _, prof := range wl.Profiles {
 		if *normalize > 0 {
-			prof.Specs["cpu"] = *normalize * prof.Specs["cpu"].(float64) / maxProcs
+			prof.Specs["cpu"] = *normalize * prof.Specs["cpu"].(float64) / maxCPU
 		} else if *uniform > 0 {
 			prof.Specs["cpu"] = *uniform
 		}
@@ -84,6 +92,8 @@ func main() {
 			// resources requests can not be lower than 1m
 			prof.Specs["cpu"] = float64(0.001)
 		}
+		cpu := prof.Specs["cpu"].(float64)
+		prof.Specs["cpu"] = math.Round(cpu*1000) / 1000
 		if *trim > 0 && prof.Specs["delay"].(float64) > trimFloat {
 			prof.Specs["delay"] = trimFloat
 		}
@@ -118,7 +128,7 @@ func parseLine(lineStr string, wl *translate.Workload) {
 	}
 
 	// Create the profile if it does not exist
-	profileName := fmt.Sprintf("delay%f", runTime)
+	profileName := fmt.Sprintf("delay%d", int64(runTime))
 	_, ok := wl.Profiles[profileName]
 	if !ok {
 		wl.Profiles[profileName] = translate.Profile{
@@ -166,14 +176,14 @@ func encodeWorkload(wl *translate.Workload, e *json.Encoder) {
 }
 
 func parseLineStringToSlice(line string) []string {
-	var err error
+	//var err error
 	if len(line) == 0 || line[0] == ';' {
-		if strings.Contains(line, "MaxProcs") {
-			maxProcs, err = strconv.ParseFloat(strings.Split(line, ": ")[1], 64)
-			if err != nil {
-				panic(err)
-			}
-		}
+		//if strings.Contains(line, "MaxProcs") {
+		//	maxCPU, err = strconv.ParseFloat(strings.Split(line, ": ")[1], 64)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//}
 		return nil
 	}
 
