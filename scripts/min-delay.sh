@@ -1,6 +1,6 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/200_delay170.json
+W=../batkube/examples/workloads/spaced_200_delay170.json
 P=../batkube/examples/platforms/platform_graphene_16nodes.xml
 SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
@@ -12,7 +12,7 @@ END=50
 STEP=5
 PASSES=15 # number of trials per point
 
-out="results/min-delay-$(basename $W | cut -f 1 -d '.').csv"
+out="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
 
 if [ -f "$out" ]; then
   echo "$out already exists."
