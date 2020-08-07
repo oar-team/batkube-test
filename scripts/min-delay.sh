@@ -26,7 +26,7 @@ fi
 
 
 touch "$out"
-echo "delay exit_code duration" > $out
+echo "delay,exit_code,duration" > $out
 
 killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
@@ -88,7 +88,7 @@ while [ $delay -le $END ]; do
     ((successes+= 1 - $exit_code))
     total_success_sim_time=$(echo "$total_success_sim_time + $duration" | bc)
 
-    echo "$delay $exit_code $duration" >> $out
+    echo "${delay},${exit_code},${durationo}" >> $out
 
     echo " (sim ${duration}s, total $(echo "$(date +%s.%N) - $pass_start" | bc)s)"
     ((i++))
