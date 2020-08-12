@@ -1,7 +1,7 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/spaced_200_delay170.json
-P=../batkube/examples/platforms/platform_graphene_16nodes.xml
+W=../batkube/examples/workloads/KIT_10h_80.json
+P=../batkube/examples/platforms/1node_6core.xml
 SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
 BATKUBE=../batkube/batkube
@@ -62,7 +62,7 @@ while [ $delay -le $END ]; do
     $SCHED --kubeconfig="$KUBECONFIG" --kube-api-content-type=application/json --leader-elect=false --scheduler-name=default > scheduler.log 2>&1 &
     sched_pid=$!
 
-    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay "$delay"ms > batkube.log 2>&1 &
+    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --scheduler-crash-timeout=30s --min-delay "$delay"ms > batkube.log 2>&1 &
     batkube_pid=$!
     sleep 5 # give time for the api to start
 
