@@ -1,21 +1,25 @@
 #!/bin/sh
 
-W=../batkube/examples/workloads/KIT_10h_80.json
-P=../batkube/examples/platforms/1node_6core.xml
-SCHED=../../expes/kubernetes/scheduler
-KUBECONFIG=../batkube/kubeconfig.yaml
-BATKUBE=../batkube/batkube
+#W="../batkube/examples/workloads/KIT_10h_80.json"
+#P="../batkube/examples/platforms/1node_6core.xml"
+W="../batkube/examples/workloads/200_delay170.json"
+P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
+SCHED="../../expes/kubernetes/scheduler"
+KUBECONFIG="../batkube/kubeconfig.yaml"
+BATKUBE="../batkube/batkube"
 
 RESUME=true
 
 # timeout starting and ending values in ms
-START=50
+START=51
 END=75
 STEP=1
 
 out="expe-out/timeout_$(basename $W | cut -f 1 -d '.').csv"
 
-if [ $RESUME -ne "true" ]; then
+if [ $RESUME = true ]; then
+  echo "Resuming experiment on $out"
+else
   if [ -f "$out" ]; then
     echo "$out already exists."
     read -p "Overwrite? [Y/n] " input
@@ -26,8 +30,6 @@ if [ $RESUME -ne "true" ]; then
     fi
   fi
   echo "timeout,duration,makespan,mean_waiting_time" > $out
-else
-  echo "Resuming experiment on $out"
 fi
 
 killall batsim > /dev/null 2>&1
