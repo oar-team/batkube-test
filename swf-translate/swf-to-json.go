@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
+	"github.com/oar-team/batkube/pkg/translate"
 )
 
 var maxCPU float64 // to normalize cpu usage

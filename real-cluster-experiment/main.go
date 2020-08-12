@@ -15,7 +15,7 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
-	"gitlab.com/ryax-tech/internships/2020/scheduling_simulation/batkube/pkg/translate"
+	"github.com/oar-team/batkube/pkg/translate"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
