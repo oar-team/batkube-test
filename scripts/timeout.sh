@@ -6,25 +6,29 @@ SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
 BATKUBE=../batkube/batkube
 
+RESUME=true
+
 # timeout starting and ending values in ms
-START=0
-END=50
+START=50
+END=75
 STEP=1
 
 out="expe-out/timeout_$(basename $W | cut -f 1 -d '.').csv"
 
-if [ -f "$out" ]; then
-  echo "$out already exists."
-  read -p "Overwrite? [Y/n] " input
-  if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
-  then
-    echo "exiting"
-    exit
+if [ $RESUME -ne "true" ]; then
+  if [ -f "$out" ]; then
+    echo "$out already exists."
+    read -p "Overwrite? [Y/n] " input
+    if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
+    then
+      echo "exiting"
+      exit
+    fi
   fi
+  echo "timeout,duration,makespan,mean_waiting_time" > $out
+else
+  echo "Resuming experiment on $out"
 fi
-
-touch "$out"
-echo "timeout,duration,makespan,mean_waiting_time" > $out
 
 killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1
@@ -90,3 +94,4 @@ done
 
 exp_duration=$(date -d@$(echo "$(date +%s.%N) - $exp_start" | bc) -u +%Hh%Mm%Ss)
 echo "Experience lasted ${exp_duration}s"
+echo "Writing output to $out"

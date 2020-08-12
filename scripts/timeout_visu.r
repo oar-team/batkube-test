@@ -32,7 +32,9 @@ csvdata[-1:-3,] %>% ggplot(aes(x=timeout, y=makespan)) +
 	geom_hline(yintercept=makespan.mean+makespan.sd, linetype="dashed") +
 	geom_hline(yintercept=makespan.mean) +
 	geom_hline(yintercept=makespan.mean-makespan.sd, linetype="dashed") +
-	ggtitle("200x delay 170s, burst")
+	ggtitle("Timeout value effect on makespan (burst workload)") +
+	xlab("timeout value (ms)") +
+	ylab("makespan (s)")
 ggsave(paste("../results/", type, "_", filename, "_makespan", ".png", sep=""))
 
 mwt.sd <- sd(metrics$mwt)
@@ -42,6 +44,8 @@ csvdata[-1:-3,] %>% ggplot(aes(x=timeout, y=mean_waiting_time)) +
 	geom_hline(yintercept=mwt.mean+mwt.sd, linetype="dashed") +
 	geom_hline(yintercept=mwt.mean) +
 	geom_hline(yintercept=mwt.mean-mwt.sd, linetype="dashed") +
-	ggtitle("200x delay 170s, burst")
+	ggtitle("Timeout value effect on mean waiting time (burst workload)") +
+	xlab("timeout value (ms)") +
+	ylab("mean waiting time (s)")
 
 ggsave(paste("../results/", type, "_", filename, "_mwt", ".png", sep=""))
