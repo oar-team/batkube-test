@@ -12,7 +12,7 @@ END=50
 STEP=5
 PASSES=15 # number of trials per point
 
-out="expe-out/min-delay-$(basename $W | cut -f 1 -d '.').csv"
+out="expe-out/min-delay_$(basename $W | cut -f 1 -d '.').csv"
 
 if [ -f "$out" ]; then
   echo "$out already exists."
