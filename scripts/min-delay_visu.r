@@ -6,7 +6,7 @@ library(data.table)
 # Script for visualizing minimal delay effect on the amount of crashes and
 # simulation time
 
-filename <- "200_delay170"
+filename <- "spaced_200_delay170"
 
 csvdata <- read.csv(paste("../results/min-delay_", filename, ".csv", sep=""))
 old.csvdata <- read.csv(paste("../results/min-delay_", filename, "-aggregated.csv", sep=""))
@@ -40,8 +40,17 @@ aggregated %>% ggplot(aes(x=delay, y=crash.rate)) +
 	ylab("crash rate")
 ggsave(paste("../results/", "min-delay_", filename, "_crash", ".png", sep=""))
 
-ggplot(csvdata, aes(x=as.factor(delay), y=duration)) + 
+csvdata %>% ggplot(aes(x=as.factor(delay), y=duration)) + 
     geom_boxplot(fill="slateblue", alpha=0.2) + 
 	xlab("delay value (ms)") +
 	ylab("duration")
 ggsave(paste("../results/", "min-delay_", filename, "_duration", ".png", sep=""))
+
+old.csvdata %>% filter(mean_success_sim_time>0) %>%
+	ggplot(aes(x=delay, y=mean_success_sim_time)) + 
+	geom_line() +
+	geom_point() +
+	xlab("delay value (ms)") +
+	ggtitle("Minimum delay value effect on duration (spaced workload)") +
+	ylab("mean duration")
+ggsave(paste("../results/", "min-delay_", filename, "_duration_old", ".png", sep=""))

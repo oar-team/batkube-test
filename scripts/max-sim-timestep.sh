@@ -8,8 +8,9 @@ SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
 
-RESUME=false
+RESUME=true
 
+START_EXPONENT=2
 END_EXPONENT=5 # 100s (1e5ms)
 # logarithmic scale
 
@@ -35,11 +36,17 @@ killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
 e=0
+while [ $e -lt $START_EXPONENT ]; do
+  ((e++))
+  zeros=${zeros}0
+done
+
 exp_start=$(date +%s.%N)
-while [ $e -lt $END_EXPONENT ]; do
+while [ $e -le $END_EXPONENT ]; do
   i=0
   echo "Current exponent: $e/$END_EXPONENT"
-  while [ $i -lt 10 ]; do
+  [ -z $zeros ] && echo "Skipping exponent 0"
+  while [ $i -lt 9 ]; do
     ((i++))
     if [ -z $zeros ]; then
       continue
@@ -61,7 +68,7 @@ while [ $e -lt $END_EXPONENT ]; do
     $SCHED --kubeconfig="$KUBECONFIG" --kube-api-content-type=application/json --leader-elect=false --scheduler-name=default > scheduler.log 2>&1 &
     sched_pid=$!
 
-    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay=0ms --scheduler-crash-timeout=30s --timeout-value=50ms --max-simulation-timestep=${max_timestep}ms> batkube.log 2>&1 &
+    $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay=0ms --scheduler-crash-timeout=30s --timeout-value=50ms --base-simulation-timestep=10ms --max-simulation-timestep=${max_timestep}ms> batkube.log 2>&1 &
     batkube_pid=$!
     sleep 5 # give time for the api to start
 
@@ -80,6 +87,7 @@ while [ $e -lt $END_EXPONENT ]; do
 
     [ $exit_code -gt 0 ] && \
       echo "Simulation failed with code $exit_code. Retrying." && \
+      ((i--)) && \
       continue
 
     res=$(tail -n 2 batsim.log | head -n 1)
