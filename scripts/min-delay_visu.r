@@ -57,8 +57,8 @@ csvdata %>% ggplot(aes(x=delay, y=mean_duration, fill=type, col=type)) +
 	geom_errorbar(aes(ymax=lower_ci, ymin=upper_ci)) +
 	geom_vline(aes(xintercept=20, col="timeout"), linetype="dashed") +
 	xlab("delay value (ms)") +
-	ggtitle("Minimum delay value effect on duration") +
-	ylab("mean duration") +
+	ggtitle("Minimum delay value effect on simulation time") +
+	ylab("mean simulation time") +
 	theme(aspect.ratio=1) +
 	facet_wrap(~ type)
 ggsave("../results/min-delay_duration.png")
