@@ -6,27 +6,32 @@ SCHED=../../expes/kubernetes/scheduler
 KUBECONFIG=../batkube/kubeconfig.yaml
 BATKUBE=../batkube/batkube
 
+RESUME=true
+
 # min delay starting and ending values in ms
-START=0
+START=50
 END=50
 STEP=5
 PASSES=15 # number of trials per point
 
 out="expe-out/min-delay_$(basename $W | cut -f 1 -d '.').csv"
 
-if [ -f "$out" ]; then
-  echo "$out already exists."
-  read -p "Overwrite? [Y/n] " input
-  if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
-  then
-    echo "exiting"
-    exit
+if [ $RESUME = true ]; then
+  echo "Resuming experiment on $out"
+else
+  if [ -f "$out" ]; then
+    echo "$out already exists."
+    read -p "Overwrite? [Y/n] " input
+    if ! [ \( -z "$input" \) -o \( "$input" = "Y" -o "$input" = "y" \) ]
+    then
+      echo "exiting"
+      exit
+    fi
   fi
+  echo "delay,exit_code,duration" > $out
 fi
 
 
-touch "$out"
-echo "delay,exit_code,duration" > $out
 
 killall batsim > /dev/null 2>&1
 killall scheduler > /dev/null 2>&1

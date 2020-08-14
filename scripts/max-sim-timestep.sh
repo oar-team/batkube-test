@@ -2,15 +2,16 @@
 
 #W="../batkube/examples/workloads/KIT_10h_80.json"
 #P="../batkube/examples/platforms/1node_6core.xml"
-W="../batkube/examples/workloads/spaced_200_delay170.json"
+W="../batkube/examples/workloads/200_delay170.json"
 P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
 SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
 
-RESUME=true
+RESUME=false
+RESUME_STEP=9 # digit at which to resume the simulation, at the start expononent
 
-START_EXPONENT=2
+START_EXPONENT=1
 END_EXPONENT=5 # 100s (1e5ms)
 # logarithmic scale
 
@@ -44,6 +45,7 @@ done
 exp_start=$(date +%s.%N)
 while [ $e -le $END_EXPONENT ]; do
   i=0
+  [ $RESUME = true -a $e -eq $START_EXPONENT ] && i=$(( $RESUME_STEP - 1 ))
   echo "Current exponent: $e/$END_EXPONENT"
   [ -z $zeros ] && echo "Skipping exponent 0"
   while [ $i -lt 9 ]; do
