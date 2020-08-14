@@ -8,12 +8,12 @@ SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
 
-RESUME=true
+RESUME=false
 RESUME_STEP=1 # digit at which to resume the simulation, at the start expononent
 
-PASSES=4
+PASSES=5
 # logarithmic scale
-START_EXPONENT=1
+START_EXPONENT=2
 END_EXPONENT=6 # 100s to 900s (1e5ms)
 
 out="expe-out/max-timestep_$(basename $W | cut -f 1 -d '.').csv"
@@ -41,7 +41,7 @@ exp_start=$(date +%s.%N)
 pass=0
 while [ $pass -lt $PASSES ]; do
   pass_start=$(date +%s.%N)
-  echo "Pass ${pass}/$PASSES"
+  echo "Pass $(( $pass + 1 ))/$PASSES"
 
   e=0
   zeros=
@@ -114,7 +114,7 @@ while [ $pass -lt $PASSES ]; do
   done
 
   pass_duration=$(date -d@$(echo "$(date +%s.%N) - $pass_start" | bc) -u +%Hh%Mm%Ss)
-  rough_eta=$(echo "$pass_duration * ($PASSES - $pass)" | bc)
+  rough_eta=$(echo "$pass_duration * ($PASSES - $pass - 1)" | bc)
   echo "Pass done. ETA: $(date -d@$rough_eta -u +%Hh%Mh%Ss) ($(date --date="$rough_eta seconds"))"
   echo
   ((pass++))
