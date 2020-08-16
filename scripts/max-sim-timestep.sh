@@ -1,19 +1,19 @@
 #!/bin/sh
 
-#W="../batkube/examples/workloads/KIT_10h_80.json"
-#P="../batkube/examples/platforms/1node_6core.xml"
-W="../batkube/examples/workloads/200_delay170.json"
-P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
+W="../batkube/examples/workloads/KIT_10h_80.json"
+P="../batkube/examples/platforms/1node_6core.xml"
+#W="../batkube/examples/workloads/200_delay170.json"
+#P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
 SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
 
-RESUME=false
+RESUME=true
 RESUME_STEP=1 # digit at which to resume the simulation, at the start expononent
 
-PASSES=5
+PASSES=1
 # logarithmic scale
-START_EXPONENT=2
+START_EXPONENT=3
 END_EXPONENT=6 # 100s to 900s (1e5ms)
 
 out="expe-out/max-timestep_$(basename $W | cut -f 1 -d '.').csv"
@@ -38,10 +38,10 @@ killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
 exp_start=$(date +%s.%N)
-pass=0
-while [ $pass -lt $PASSES ]; do
+pass=1
+while [ $pass -le $PASSES ]; do
   pass_start=$(date +%s.%N)
-  echo "Pass $(( $pass + 1 ))/$PASSES"
+  echo "Pass $(( $pass ))/$PASSES"
 
   e=0
   zeros=
@@ -76,7 +76,7 @@ while [ $pass -lt $PASSES ]; do
       $SCHED --kubeconfig="$KUBECONFIG" --kube-api-content-type=application/json --leader-elect=false --scheduler-name=default > scheduler.log 2>&1 &
       sched_pid=$!
 
-      $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay=0ms --scheduler-crash-timeout=30s --timeout-value=50ms --base-simulation-timestep=10ms --max-simulation-timestep=${max_timestep}ms> batkube.log 2>&1 &
+      $BATKUBE --scheme=http --port 8001 --fast-forward-on-no-pending-jobs --detect-scheduler-deadlock --min-delay=0ms --scheduler-crash-timeout=10s --timeout-value=50ms --base-simulation-timestep=10ms --max-simulation-timestep=${max_timestep}ms> batkube.log 2>&1 &
       batkube_pid=$!
       sleep 5 # give time for the api to start
 
@@ -113,9 +113,10 @@ while [ $pass -lt $PASSES ]; do
     ((e++))
   done
 
-  pass_duration=$(date -d@$(echo "$(date +%s.%N) - $pass_start" | bc) -u +%Hh%Mm%Ss)
-  rough_eta=$(echo "$pass_duration * ($PASSES - $pass - 1)" | bc)
-  echo "Pass done. ETA: $(date -d@$rough_eta -u +%Hh%Mh%Ss) ($(date --date="$rough_eta seconds"))"
+  pass_duration=$(echo "$(date +%s.%N) - $pass_start" | bc)
+  echo "pass done in $(date -d@$pass_duration -u +%Hh%Mh%Ss)"
+  rough_eta=$(echo "$pass_duration * ($PASSES - $pass)" | bc)
+  echo "ETA: $(date -d@$rough_eta -u +%Hh%Mh%Ss) ($(date --date="$rough_eta seconds"))"
   echo
   ((pass++))
 echo
