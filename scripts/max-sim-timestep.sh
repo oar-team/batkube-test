@@ -1,9 +1,9 @@
 #!/bin/sh
 
-W="../batkube/examples/workloads/KIT_10h_80.json"
-P="../batkube/examples/platforms/1node_6core.xml"
-#W="../batkube/examples/workloads/200_delay170.json"
-#P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
+#W="../batkube/examples/workloads/KIT_10h_80.json"
+#P="../batkube/examples/platforms/1node_6core.xml"
+W="../batkube/examples/workloads/spaced_200_delay170.json"
+P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
 SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
@@ -11,9 +11,9 @@ BATKUBE="../batkube/batkube"
 RESUME=true
 RESUME_STEP=1 # digit at which to resume the simulation, at the start expononent
 
-PASSES=1
+PASSES=5
 # logarithmic scale
-START_EXPONENT=3
+START_EXPONENT=6
 END_EXPONENT=6 # 100s to 900s (1e5ms)
 
 out="expe-out/max-timestep_$(basename $W | cut -f 1 -d '.').csv"
