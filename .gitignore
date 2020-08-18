@@ -7,3 +7,5 @@ workload.swf
 batsim.log
 batkube.log
 scheduler.log
+
+results/*.png
