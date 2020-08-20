@@ -31,10 +31,10 @@ csvdata %>% ggplot(aes(x=delay, y=mean_duration, fill=type, col=type)) +
 	geom_errorbar(aes(ymax=lower_ci, ymin=upper_ci)) +
 	geom_vline(aes(xintercept=20, col="timeout"), linetype="dashed") +
 	xlab("delay value (ms)") +
-	ylab("mean simulation time") +
-	theme(aspect.ratio=1, text=element_text(size=16)) +
+	ylab("mean simulation time (s)") +
+	theme(text=element_text(size=16)) +
 	facet_wrap(~ type)
-ggsave("../results/min-delay_duration.png")
+ggsave("../results/min-delay_duration.png", width=12, height=5)
 
 old.data %>% ggplot(aes(x=delay, y=crash.rate)) +
 	geom_point() +

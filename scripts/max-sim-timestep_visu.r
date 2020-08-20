@@ -1,6 +1,7 @@
 library(ggplot2)
 library(dplyr)
 library(patchwork)
+library(tidyr)
 
 filename <- "200_delay170"
 
@@ -11,82 +12,48 @@ spaced.data <- read.csv(paste("../results/max-timestep_spaced_", filename, ".csv
 realistic.data <- read.csv("../results/max-timestep_KIT_10h_80.csv") %>% mutate(type="realistic")
 
 csvdata <- rbind(burst.data, spaced.data, realistic.data)
+colnames(csvdata)[colnames(csvdata) == "duration"] <- "simulation_time"
 
-#makespan <- rbind(burst.data, spaced.data, realistic.data) %>%
-#	group_by(max_timestep, type) %>%
-#	summarize(mean_makespan=mean(makespan),
-#		  sd_makespan=sd(makespan),
-#		  count=n()) %>%
-#    mutate(se_makespan=mean_makespan / sqrt(count),
-#           lower_ci=mean_makespan-1.96*se_makespan,
-#           upper_ci=mean_makespan+1.96*se_makespan)
-#
-#mwt <- rbind(burst.data, spaced.data, realistic.data) %>%
-#	group_by(max_timestep, type) %>%
-#	summarize(mean_mwt=mean(mean_waiting_time),
-#		  sd_mwt=sd(mean_waiting_time),
-#		  count=n()) %>%
-#    mutate(se_mwt=mean_mwt / sqrt(count),
-#           lower_ci=mean_mwt-1.96*se_mwt,
-#           upper_ci=mean_mwt+1.96*se_mwt)
-#
-#duration <- rbind(burst.data, spaced.data, realistic.data) %>%
-#	group_by(max_timestep, type) %>%
-#	summarize(mean_duration=mean(duration),
-#		  sd_duration=sd(duration),
-#		  count=n()) %>%
-#    mutate(se_duration=mean_duration / sqrt(count),
-#           lower_ci=mean_duration-1.96*se_duration,
-#           upper_ci=mean_duration+1.96*se_duration)
-#
-#makespan %>% filter() %>% ggplot(aes(x=max_timestep, y=mean_makespan, fill=type, linetype=type, col=type)) +
-#	#geom_point(aes(col=type)) +
-#	#geom_smooth(method="loess", alpha=0.5) +
-#	geom_line() +
-#	geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci)) +
-#	ggtitle("Max timestep value effect on makespan") +
-#	xlab("timeout value (ms)") +
-#	ylab("mean makespan (s)") +
-#	#facet_wrap(~ type) +
-#	scale_x_continuous(trans='log10')
-#ggsave("../results/max-timestep_makespan.png")
-#
-#mwt %>% filter() %>% ggplot(aes(x=max_timestep, y=mean_mwt, fill=type, linetype=type, col=type)) +
-#	#geom_point(aes(col=type)) +
-#	#geom_smooth(method="loess", alpha=0.5) +
-#	geom_line() +
-#	geom_errorbar(aes(ymax=lower_ci, ymin=upper_ci)) +
-#	ggtitle("Max timestep value effect on mean waiting time") +
-#	xlab("timeout value (ms)") +
-#	ylab("mean waiting time (s)") +
-#	#facet_wrap(~ type) +
-#	scale_x_continuous(trans='log10')
-#ggsave("../results/max-timestep_mwt.png")
-
-csvdata %>% filter(type!="realistic") %>% ggplot(aes(x=max_timestep, y=makespan, fill=type, col=type)) +
-	geom_point() +
-	#geom_smooth(method="loess") +
-	ggtitle("Maximum timestep value effect on makespan") +
-	xlab("max timestep value (ms)") +
-	ylab("makespan (s)") +
+csvdata %>% 
+	filter(type!="realistic") %>% 
+	gather(-max_timestep, -type, key = "metric", value = "value") %>%
+	ggplot(aes(x=max_timestep, y=value, fill=type, col=type)) +
+	geom_point(alpha=0.35) +
+	geom_smooth(method="loess", alpha=0.7) +
+	xlab("maximum simulation timestep (ms)") +
+	ylab("value (s)") +
 	scale_y_continuous(trans='log10') +
-	scale_x_continuous(trans='log10')
-ggsave("../results/max-timestep_makespan.png")
+	scale_x_continuous(trans='log10') +
+	theme(text=element_text(size=16)) +
+	facet_wrap(~metric, scales="free_y")
+ggsave("../results/max-timestep_burst_sp.png", width=12, height=5)
 
-csvdata %>% filter() %>% ggplot(aes(x=max_timestep, y=mean_waiting_time, fill=type, col=type)) +
+csvdata %>% 
+	filter(type=="realistic", makespan < 32560) %>% 
+	gather(-max_timestep, -type, key = "metric", value = "value") %>%
+	ggplot(aes(x=max_timestep, y=value, fill=type, col=type)) +
 	geom_point() +
-	#geom_smooth(method="loess") +
-	ggtitle("Maximum timestep value effect on mean waiting time") +
-	xlab("max timestep value (ms)") +
-	ylab("mean waiting time (s)") +
-	scale_x_continuous(trans='log10')
-ggsave("../results/max-timestep_mwt.png")
+	#geom_smooth(method="loess", alpha=0.7) +
+	xlab("maximum simulation timestep (ms)") +
+	ylab("value (s)") +
+	scale_y_continuous(trans='log10') +
+	scale_x_continuous(trans='log10') +
+	scale_color_viridis_d() +
+	scale_fill_viridis_d() +
+	theme(text=element_text(size=16)) +
+	facet_wrap(~metric, scales="free_y")
+ggsave("../results/max-timestep_realistic.png", width=12, height=5)
 
-csvdata %>% filter() %>% ggplot(aes(x=max_timestep, y=duration, fill=type, linetype=type, col=type)) +
-	geom_point() +
-	geom_smooth(method="loess") +
-	ggtitle("Maximum timestep value effect on simulation time") +
-	xlab("max timestep value value (ms)") +
-	ylab("simulation time (s)") +
-	scale_x_continuous(trans='log10')
-ggsave("../results/max-timestep_duration.png")
+csvdata %>%
+	subset(select=-max_timestep) %>%
+	filter(makespan < 32560) %>% 
+	gather(-simulation_time, -type, key = "metric", value = "value") %>%
+	ggplot(aes(x=simulation_time, y=value, fill=type, linetype=type, col=type)) +
+	geom_point(aes(col=type)) +
+	#geom_smooth(method="loess", alpha=0.5) +
+	theme(text=element_text(size=16)) +
+	scale_x_continuous(trans='log10') +
+	xlab("simulation time (s)") +
+	ylab("value (s)") +
+	facet_wrap(~type+metric, scales="free_y")
+ggsave("../results/max-timestep_sim_time_vs_metrics.png", width=12, height=8)
