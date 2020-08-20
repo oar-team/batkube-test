@@ -22,7 +22,7 @@ csvdata <- rbind(spaced.data, burst.data, realistic.data) %>%
            lower_ci=mean_duration-1.96*se_duration,
            upper_ci=mean_duration+1.96*se_duration)
 
-old.data <- read.csv(paste("../results/min-delay_", filename, "-aggregated.csv", sep=""))
+old.data <- read.csv(paste("../results/min-delay_spaced_", filename, "-aggregated.csv", sep=""))
 old.data$crash.rate <- sapply(old.data$success_rate, function(x){return(1-x)})
 
 csvdata %>% ggplot(aes(x=delay, y=mean_duration, fill=type, col=type)) + 
@@ -31,9 +31,8 @@ csvdata %>% ggplot(aes(x=delay, y=mean_duration, fill=type, col=type)) +
 	geom_errorbar(aes(ymax=lower_ci, ymin=upper_ci)) +
 	geom_vline(aes(xintercept=20, col="timeout"), linetype="dashed") +
 	xlab("delay value (ms)") +
-	ggtitle("Minimum delay value effect on simulation time") +
 	ylab("mean simulation time") +
-	theme(aspect.ratio=1) +
+	theme(aspect.ratio=1, text=element_text(size=16)) +
 	facet_wrap(~ type)
 ggsave("../results/min-delay_duration.png")
 
@@ -41,16 +40,16 @@ old.data %>% ggplot(aes(x=delay, y=crash.rate)) +
 	geom_point() +
 	geom_line() +
 	ylim(0, 1) +
-	ggtitle("Minimum delay value effect on crash rate (spaced workload)") +
+	theme(text=element_text(size=16)) +
 	xlab("delay value (ms)") +
 	ylab("crash rate")
-ggsave(paste("../results/", "min-delay_", filename, "_crash_old", ".png", sep=""))
+ggsave("../results/min-delay_crash_old.png")
 
-old.data %>% filter(mean_success_sim_time>0) %>%
-	ggplot(aes(x=delay, y=mean_success_sim_time)) + 
-	geom_line() +
-	geom_point() +
-	xlab("delay value (ms)") +
-	ggtitle("Minimum delay value effect on duration (spaced workload)") +
-	ylab("mean duration")
-ggsave(paste("../results/", "min-delay_", filename, "_duration_old", ".png", sep=""))
+#old.data %>% filter(mean_success_sim_time>0) %>%
+#	ggplot(aes(x=delay, y=mean_success_sim_time)) + 
+#	geom_line() +
+#	geom_point() +
+#	theme(base_size=16) +
+#	xlab("delay value (ms)") +
+#	ylab("mean duration")
+#ggsave(paste("../results/", "min-delay_", filename, "_duration_old", ".png", sep=""))
