@@ -1,9 +1,9 @@
 #!/bin/sh
 
-W="../batkube/examples/workloads/KIT_10h_80.json"
-P="../batkube/examples/platforms/1node_6core.xml"
-#W="../batkube/examples/workloads/spaced_200_delay170.json"
-#P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
+#W="../batkube/examples/workloads/KIT_10h_80.json"
+#P="../batkube/examples/platforms/1node_6core.xml"
+W="../batkube/examples/workloads/spaced_200_delay170.json"
+P="../batkube/examples/platforms/platform_graphene_16nodes.xml"
 SCHED="../../expes/kubernetes/scheduler"
 KUBECONFIG="../batkube/kubeconfig.yaml"
 BATKUBE="../batkube/batkube"
@@ -15,7 +15,7 @@ killall scheduler > /dev/null 2>&1
 killall batkube > /dev/null 2>&1
 
 exp_start=$(date +%s.%N)
-pass=0
+pass=5
 while [ $pass -lt $PASSES ]; do
   pass_start=$(date +%s.%N)
   echo -n "Pass $(( $pass + 1))/$PASSES..."
