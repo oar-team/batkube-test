@@ -24,7 +24,7 @@ csvdata %>%
 	ylab("value (s)") +
 	scale_y_continuous(trans='log10') +
 	scale_x_continuous(trans='log10') +
-	theme(text=element_text(size=16)) +
+	theme_bw(base_size=18) +
 	facet_wrap(~metric, scales="free_y")
 ggsave("../results/max-timestep_burst_sp.png", width=12, height=5)
 
@@ -40,7 +40,7 @@ csvdata %>%
 	scale_x_continuous(trans='log10') +
 	scale_color_viridis_d() +
 	scale_fill_viridis_d() +
-	theme(text=element_text(size=16)) +
+	theme_bw(base_size=18) +
 	facet_wrap(~metric, scales="free_y")
 ggsave("../results/max-timestep_realistic.png", width=12, height=5)
 
@@ -51,7 +51,7 @@ csvdata %>%
 	ggplot(aes(x=simulation_time, y=value, fill=type, linetype=type, col=type)) +
 	geom_point(aes(col=type)) +
 	#geom_smooth(method="loess", alpha=0.5) +
-	theme(text=element_text(size=16)) +
+	theme_bw(base_size=18) +
 	scale_x_continuous(trans='log10') +
 	xlab("simulation time (s)") +
 	ylab("value (s)") +

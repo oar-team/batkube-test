@@ -41,7 +41,7 @@ csvdata %>%
 	ggplot(aes(x=timeout, y=value, col=type, fill=type)) +
 	geom_point(aes(col=type, fill=type)) +
 	geom_smooth(method="loess", alpha=0.5) +
-	theme(text=element_text(size=16)) +
+	theme_bw(base_size=18) +
 	xlab("timeout (ms)") +
 	ylab("value (s)") +
 	#scale_color_viridis_d() +
@@ -55,7 +55,7 @@ csvdata %>%
 	ggplot(aes(x=timeout, y=value, fill=type, linetype=type, col=type)) +
 	geom_point(aes(col=type)) +
 	#geom_smooth(method="loess", alpha=0.5) +
-	theme(text=element_text(size=16)) +
+	theme_bw(base_size=18) +
 	scale_color_viridis_d() +
 	scale_fill_viridis_d() +
 	xlab("timeout (ms)") +
